@@ -3,11 +3,14 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"strings"
 	"testing"
 
-	actool "github.com/Autumn-27/norma/tool"
 	"github.com/Autumn-27/artex/agent"
 	"github.com/Autumn-27/artex/db"
+	"github.com/Autumn-27/norma/permission"
+	actool "github.com/Autumn-27/norma/tool"
 )
 
 func names(tools []actool.CoreTool) map[string]actool.CoreTool {
@@ -32,7 +35,7 @@ func TestWireTools(t *testing.T) {
 	}
 	defer pg.Close()
 
-	wireTools(pg, nil) // nil domainReg: test only covers filter/decoration, not injection
+	wireTools(pg, nil, nil) // nil domainReg: test only covers filter/decoration, not injection
 	t.Cleanup(func() { agent.ToolResolve = nil })
 	// Prevent interactive-shell Bash decoration: if the worker agent has
 	// interactive_shell=true in the DB, ToolResolve would append a note to
@@ -106,4 +109,56 @@ func TestWireTools(t *testing.T) {
 func mustJSON(v any) json.RawMessage {
 	b, _ := json.Marshal(v)
 	return b
+}
+
+// TestWireToolsBashRedirectReplacesBash verifies the M1 sandbox wiring: when
+// wireTools receives a bashRedirect, the assembled tool list carries the
+// redirect's Bash (Run swapped), never the built-in one.
+func TestWireToolsBashRedirectReplacesBash(t *testing.T) {
+	dsn := os.Getenv("ARTEX_PG_DSN")
+	if dsn == "" {
+		t.Skip("ARTEX_PG_DSN not set — skipping")
+	}
+	pg, err := db.Open(dsn)
+	if err != nil {
+		t.Skipf("postgres unavailable (%v) — skipping", err)
+	}
+	defer pg.Close()
+
+	var redirects int
+	replacer := func() actool.CoreTool {
+		redirects++
+		return actool.Build(actool.Spec{
+			Name:        "Bash",
+			Description: "sandbox-routed bash",
+			Schema:      map[string]any{"type": "object", "properties": map[string]any{"command": map[string]any{"type": "string"}}},
+			Permissions: func(context.Context, json.RawMessage, permission.Context) permission.Decision {
+				return permission.Allowed()
+			},
+			Run: func(context.Context, json.RawMessage, *actool.ToolContext) (actool.Result, error) {
+				return actool.Text("sandboxed"), nil
+			},
+		})
+	}
+	wireTools(pg, nil, replacer) // nil domainReg: irrelevant to Bash replacement
+	t.Cleanup(func() { agent.ToolResolve = nil })
+
+	base := actool.DefaultTools() // includes the built-in Bash
+	out := names(agent.ToolResolve(context.Background(), "worker", base))
+	bash, ok := out["Bash"]
+	if !ok {
+		t.Fatal("Bash missing from resolved tools")
+	}
+	if redirects == 0 {
+		t.Fatal("bashRedirect never called — Bash was not replaced")
+	}
+	// DB decoration may rewrite description/schema, but the Run must come from
+	// the redirect (sandbox routing). Call it to prove the swap.
+	res, err := bash.Call(context.Background(), mustJSON(map[string]any{"command": "echo x"}), nil)
+	if err != nil {
+		t.Fatalf("call: %v", err)
+	}
+	if res.IsError || len(res.Content) == 0 || !strings.Contains(res.Content[0].Text, "sandboxed") {
+		t.Errorf("resolved Bash.Run is not the redirect: %+v", res)
+	}
 }

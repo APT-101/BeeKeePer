@@ -209,7 +209,10 @@ func seedPrompts(pg *db.DB) {
 // tool-assembly time each built-in tool is filtered by its agent binding / enabled
 // flag and, if kept, wrapped so the model sees the DB-overridden description/schema
 // and缺省入参 get injected. MCP/skill/host tools have no row and pass through.
-func wireTools(pg *db.DB, domainReg map[string]actool.CoreTool) {
+// bashRedirect, when non-nil, replaces the built-in Bash with the sandboxed
+// variant (activation only for ARTEX_SANDBOX=container; off/host keep the
+// baseline Bash).
+func wireTools(pg *db.DB, domainReg map[string]actool.CoreTool, bashRedirect func() actool.CoreTool) {
 	agent.FindingTrafficBindingEnabled = func() bool { return pg.GetBool(settingAgentTrafficBinding, false) }
 	// Seed the built-in domain tools (first-insert only; DO NOTHING preserves edits).
 	// No startup prune: rows we didn't seed are left alone so future user-defined
@@ -256,6 +259,9 @@ func wireTools(pg *db.DB, domainReg map[string]actool.CoreTool) {
 		}
 		out := tools[:0:0]
 		for _, t := range tools {
+			if bashRedirect != nil && t.Name() == "Bash" {
+				t = bashRedirect() // M1: 沙箱路由下的 Bash 替换（保留同名、权限链；Run 进容器）
+			}
 			row, known := byKey[t.Name()]
 			if !known { // MCP/skill/host tool: no row → untouched
 				out = append(out, t)

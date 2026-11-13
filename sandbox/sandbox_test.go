@@ -49,9 +49,18 @@ func TestNewProviderHost(t *testing.T) {
 	}
 }
 
-func TestNewProviderContainerFailsClosed(t *testing.T) {
-	if _, err := NewProvider(ModeContainer); err == nil {
-		t.Fatal("container provider must fail closed when not compiled in")
+func TestNewProviderContainerFailsClosedAtNew(t *testing.T) {
+	// container 提供者可构建（生产 API），但实例化时 docker 不可用 → New 必须
+	// fail closed，绝不静默退回宿主执行。
+	p, err := NewProvider(ModeContainer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Type() != "container" || p.Degraded() {
+		t.Errorf("container provider type/degraded = %s/%v", p.Type(), p.Degraded())
+	}
+	if _, err := p.New(context.Background(), "1", Spec{}); err == nil {
+		t.Fatal("container New must fail closed without a docker daemon")
 	}
 	if _, err := NewProvider(ModeNamespace); err == nil {
 		t.Fatal("namespace provider must fail closed when not compiled in")

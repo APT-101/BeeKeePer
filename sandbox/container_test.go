@@ -1,0 +1,226 @@
+package sandbox
+
+import (
+	"context"
+	"encoding/base64"
+	"errors"
+	"strings"
+	"testing"
+	"time"
+)
+
+// fakeRunner records docker operations so the provider's parameter mapping is
+// assertable without a docker daemon (docs §8.3 host-side development).
+type fakeRunner struct {
+	pingErr     error
+	createID    string
+	createCalls []ContainerConfig
+	execCalls   []ExecSpec
+	execResult  ExecResult
+	execErr     error
+	removeCalls []string
+}
+
+func (f *fakeRunner) Ping(ctx context.Context) error { return f.pingErr }
+
+func (f *fakeRunner) Create(ctx context.Context, cfg ContainerConfig) (string, error) {
+	f.createCalls = append(f.createCalls, cfg)
+	if f.createID != "" {
+		return f.createID, nil
+	}
+	return "cid-1", nil
+}
+
+func (f *fakeRunner) Exec(ctx context.Context, spec ExecSpec) (ExecResult, error) {
+	f.execCalls = append(f.execCalls, spec)
+	return f.execResult, f.execErr
+}
+
+func (f *fakeRunner) Remove(ctx context.Context, id string) error {
+	f.removeCalls = append(f.removeCalls, id)
+	return nil
+}
+
+func TestContainerProviderNewFailsClosedWithoutDocker(t *testing.T) {
+	p := NewContainer(&fakeRunner{pingErr: errors.New("daemon down")})
+	_, err := p.New(context.Background(), "7", Spec{})
+	if err == nil || !strings.Contains(err.Error(), "daemon") {
+		t.Fatalf("expected fail-closed ping error, got %v", err)
+	}
+}
+
+func TestContainerProviderNewHardensContainer(t *testing.T) {
+	f := &fakeRunner{createID: "cid-42"}
+	p := NewContainer(f)
+	sb, err := p.New(context.Background(), "7", Spec{
+		Image: "artex-sandbox:latest", Workspace: "/host/work/dir", SkillsDir: "/opt/artex/skills",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sb == nil {
+		t.Fatal("nil sandbox")
+	}
+	if len(f.createCalls) != 1 {
+		t.Fatalf("want 1 create, got %d", len(f.createCalls))
+	}
+	c := f.createCalls[0]
+	if c.ID != "artex-sb-7" {
+		t.Errorf("container name = %q", c.ID)
+	}
+	if len(c.CapDrop) != 1 || c.CapDrop[0] != "ALL" {
+		t.Errorf("cap_drop = %v, want [ALL]", c.CapDrop)
+	}
+	if !c.ReadOnly {
+		t.Error("rootfs must be read-only")
+	}
+	if len(c.Tmpfs) != 1 || c.Tmpfs[0] != "/tmp" {
+		t.Errorf("tmpfs = %v, want [/tmp]", c.Tmpfs)
+	}
+	joined := strings.Join(c.Binds, "|")
+	if !strings.Contains(joined, "/host/work/dir:/workspace:ro") {
+		t.Errorf("workspace bind missing: %v", c.Binds)
+	}
+	if !strings.Contains(joined, "/opt/artex/skills:/skills:ro") {
+		t.Errorf("skills bind missing: %v", c.Binds)
+	}
+	if len(c.Entry) != 2 || c.Entry[0] != "sleep" || c.Entry[1] != "infinity" {
+		t.Errorf("entry = %v", c.Entry)
+	}
+}
+
+func TestContainerNewRejectsHostNetwork(t *testing.T) {
+	f := &fakeRunner{}
+	p := NewContainer(f)
+	_, err := p.New(context.Background(), "7", Spec{Network: "host"})
+	if err == nil || !strings.Contains(err.Error(), "禁用") {
+		t.Fatalf("host network must be rejected, got %v", err)
+	}
+	if len(f.createCalls) != 0 {
+		t.Fatal("container must not be created for rejected network")
+	}
+}
+
+func TestContainerExecMapsArgs(t *testing.T) {
+	f := &fakeRunner{execResult: ExecResult{Stdout: []byte("hello"), ExitCode: 7}}
+	p := NewContainer(f)
+	sb, err := p.New(context.Background(), "7", Spec{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := sb.Exec(context.Background(), ExecRequest{
+		Cmd: "echo hi", WorkDir: "/workspace", Env: []string{"A=1"},
+		Timeout: 5 * time.Second, MaxOut: 100,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.ExitCode != 7 || string(res.Stdout) != "hello" {
+		t.Fatalf("res = %+v", res)
+	}
+	if len(f.execCalls) != 1 {
+		t.Fatalf("want 1 exec, got %d", len(f.execCalls))
+	}
+	sp := f.execCalls[0]
+	if sp.ContainerID != "cid-1" {
+		t.Errorf("container id = %q", sp.ContainerID)
+	}
+	if sp.WorkDir != "/workspace" || len(sp.Env) != 1 {
+		t.Errorf("workdir/env = %q %v", sp.WorkDir, sp.Env)
+	}
+	if len(sp.Cmd) != 3 || sp.Cmd[0] != "/bin/sh" || sp.Cmd[2] != "echo hi" {
+		t.Errorf("cmd = %v", sp.Cmd)
+	}
+	if sp.Timeout != 5*time.Second || sp.MaxOut != 100 {
+		t.Errorf("timeout/maxout = %v %d", sp.Timeout, sp.MaxOut)
+	}
+}
+
+func TestContainerWriteReadFileRoundTrip(t *testing.T) {
+	f := &fakeRunner{execResult: ExecResult{Stdout: []byte(base64.StdEncoding.EncodeToString([]byte("payload-1")))}}
+	p := NewContainer(f)
+	sb, err := p.New(context.Background(), "7", Spec{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sb.WriteFile(context.Background(), "/tmp/scripts/x.sh", []byte("echo ok"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.execCalls) != 1 {
+		t.Fatalf("write: want 1 exec, got %d", len(f.execCalls))
+	}
+	w := f.execCalls[0]
+	if !strings.Contains(w.Cmd[2], "mkdir -p '/tmp/scripts'") || !strings.Contains(w.Cmd[2], "base64 -d > '/tmp/scripts/x.sh'") {
+		t.Errorf("write cmd = %q", w.Cmd[2])
+	}
+	if string(w.Stdin) != base64.StdEncoding.EncodeToString([]byte("echo ok")) {
+		t.Errorf("write stdin = %q", string(w.Stdin))
+	}
+	f.execResult = ExecResult{Stdout: []byte(base64.StdEncoding.EncodeToString([]byte("payload-1")) + "\n")}
+	got, err := sb.ReadFile(context.Background(), "/tmp/scripts/x.sh", 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "payload-1" {
+		t.Errorf("read = %q", string(got))
+	}
+	if len(f.execCalls) != 2 || !strings.Contains(f.execCalls[1].Cmd[2], "base64 < '/tmp/scripts/x.sh'") {
+		t.Errorf("read cmd = %q", f.execCalls[1].Cmd[2])
+	}
+}
+
+func TestContainerReadFileTruncates(t *testing.T) {
+	big := "abcdefgh"
+	f := &fakeRunner{execResult: ExecResult{Stdout: []byte(base64.StdEncoding.EncodeToString([]byte(big)))}}
+	sb := &containerSandbox{runner: f, id: "cid-1"}
+	got, err := sb.ReadFile(context.Background(), "/x", 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "abcd" {
+		t.Errorf("truncated read = %q", string(got))
+	}
+}
+
+func TestContainerCloseRemovesOnce(t *testing.T) {
+	f := &fakeRunner{}
+	sb := &containerSandbox{runner: f, id: "cid-1"}
+	if err := sb.Close(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := sb.Close(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.removeCalls) != 1 || f.removeCalls[0] != "cid-1" {
+		t.Errorf("remove calls = %v", f.removeCalls)
+	}
+}
+
+func TestSanitizeContainerName(t *testing.T) {
+	cases := map[string]string{
+		"artex-sb-7":   "artex-sb-7",
+		"artex-sb-7.2": "artex-sb-7.2",
+		"artex-sb-x y": "artex-sb-x-y",
+	}
+	for in, want := range cases {
+		if got := sanitizeContainerName(in); got != want {
+			t.Errorf("sanitize(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestContainerProbe(t *testing.T) {
+	f := &fakeRunner{}
+	sb := &containerSandbox{runner: f, id: "cid-1"}
+	// 探测不由 runner 执行（宿主 TCP 直连）；不可达 → (false, nil)。
+	open, err := sb.Probe(context.Background(), "nonexistent.invalid", 80, 200*time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if open {
+		t.Error("nonexistent host must probe closed")
+	}
+	if len(f.execCalls) != 0 {
+		t.Error("probe must not exec in the container")
+	}
+}

@@ -102,19 +102,22 @@ func ParseMode(v string) (Mode, error) {
 	return "", fmt.Errorf("ARTEX_SANDBOX=%q: 必须是 container|namespace|host|off", v)
 }
 
-// NewProvider selects the provider for a mode. container/namespace are not
-// compiled into this build: they FAIL CLOSED (caller keeps the pre-M1 path and
-// surfaces the error / red banner) rather than silently degrading. off → the
-// baseline host provider (non-degraded); host → the same execution but flagged
-// degraded so operators see the isolation gap.
+// NewProvider selects the provider for a mode. container → a real provider whose
+// New() pings the docker daemon and FAILS CLOSED when unavailable (callers keep
+// the pre-M1 path / red banner instead of silently degrading). namespace is not
+// compiled into this build: it fails closed. off → the baseline host provider
+// (non-degraded); host → the same execution but flagged degraded so operators
+// see the isolation gap.
 func NewProvider(mode Mode) (Provider, error) {
 	switch mode {
 	case ModeOff:
 		return hostProviderOff{}, nil
 	case ModeHost:
 		return hostProvider{}, nil
-	case ModeContainer, ModeNamespace:
-		return nil, errors.New("sandbox provider " + string(mode) + " 未在当前构建中实现；请设 ARTEX_SANDBOX=off 或 host")
+	case ModeContainer:
+		return NewContainer(NewDockerCLI()), nil
+	case ModeNamespace:
+		return nil, errors.New("sandbox provider namespace 未在当前构建中实现；请设 ARTEX_SANDBOX=off、host 或 container")
 	}
 	return nil, errors.New("invalid sandbox mode")
 }

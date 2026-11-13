@@ -22,6 +22,7 @@ import (
 	"github.com/Autumn-27/artex/guard"
 	"github.com/Autumn-27/artex/intercept"
 	"github.com/Autumn-27/artex/policy"
+	"github.com/Autumn-27/artex/sandbox"
 	"github.com/Autumn-27/artex/traffic"
 	actool "github.com/Autumn-27/norma/tool"
 )
@@ -261,6 +262,68 @@ type Manager struct {
 	escMu    sync.Mutex
 	escTries map[string]int
 	escMax   int
+
+	// M1 execution sandbox (docs §3.2): sandboxProv is installed at server
+	// startup from ARTEX_SANDBOX (nil = off → host-baseline, Bash untouched).
+	// sandboxMap caches one lazily-created sandbox per task; entries close on
+	// task deletion. Spec assembly (workspace/skills binds) happens at the
+	// server layer, which owns the paths.
+	sandboxProv sandbox.Provider
+	sandboxMu   sync.Mutex
+	sandboxMap  map[string]sandbox.Sandbox
+}
+
+// SetSandboxProvider installs the execution sandbox provider (server startup).
+// nil disables sandboxing (ARTEX_SANDBOX=off baseline).
+func (m *Manager) SetSandboxProvider(p sandbox.Provider) {
+	m.sandboxMu.Lock()
+	defer m.sandboxMu.Unlock()
+	m.sandboxProv = p
+}
+
+// SandboxProvider returns the current provider (nil = off/host baseline).
+func (m *Manager) SandboxProvider() sandbox.Provider {
+	m.sandboxMu.Lock()
+	defer m.sandboxMu.Unlock()
+	return m.sandboxProv
+}
+
+// FetchSandbox returns the cached per-task sandbox instance, lazily creating it
+// (and pinging the runtime) on first use. nil provider → (nil, nil): the caller
+// keeps the host-baseline path. A provider error FAILS CLOSED here — the caller
+// must surface it (Bash refuses to run) rather than silently executing.
+func (m *Manager) FetchSandbox(ctx context.Context, taskID string, spec sandbox.Spec) (sandbox.Sandbox, error) {
+	m.sandboxMu.Lock()
+	defer m.sandboxMu.Unlock()
+	if m.sandboxProv == nil {
+		return nil, nil
+	}
+	if sb := m.sandboxMap[taskID]; sb != nil {
+		return sb, nil
+	}
+	sb, err := m.sandboxProv.New(ctx, taskID, spec)
+	if err != nil {
+		return nil, err
+	}
+	if m.sandboxMap == nil {
+		m.sandboxMap = map[string]sandbox.Sandbox{}
+	}
+	m.sandboxMap[taskID] = sb
+	return sb, nil
+}
+
+// CloseTaskSandbox tears the task's sandbox container down (best effort,
+// never blocks task deletion).
+func (m *Manager) CloseTaskSandbox(ctx context.Context, taskID string) {
+	m.sandboxMu.Lock()
+	sb := m.sandboxMap[taskID]
+	delete(m.sandboxMap, taskID)
+	m.sandboxMu.Unlock()
+	if sb != nil {
+		if err := sb.Close(ctx); err != nil {
+			log.Printf("[sandbox] task %s 沙箱关闭失败: %v", taskID, err)
+		}
+	}
 }
 
 // escalationMaxAttempts returns the per-intent adjudication cap.
@@ -1563,6 +1626,7 @@ func (m *Manager) DeleteTask(id string, opts DeleteTaskOptions) (DeleteTaskResul
 		}
 	}
 	m.forgetTask(id, n)
+	m.CloseTaskSandbox(context.Background(), id) // M1: 任务删除即拆除沙箱容器（幂等、尽力而为）
 	if err := errors.Join(finalizeErrs...); err != nil {
 		return result, &taskDeleteCommittedError{err: err}
 	}

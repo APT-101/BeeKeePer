@@ -28,6 +28,7 @@ import (
 	"github.com/Autumn-27/artex/llmrec"
 	"github.com/Autumn-27/artex/metrics"
 	"github.com/Autumn-27/artex/report"
+	"github.com/Autumn-27/artex/sandbox"
 	"github.com/Autumn-27/norma/llm"
 	actool "github.com/Autumn-27/norma/tool"
 	"github.com/Autumn-27/norma/transcript"
@@ -259,9 +260,29 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string, keyDi
 		}
 		wireAgentAugment(m.pg, s.skillDir, s.hostTools) // 可见 skills/MCP + 流量/编排 host 工具装配进 agent 工具集
 		domainReg := buildDomainReg(m.Assets())
-		wireTools(m.pg, domainReg) // 内置工具表：按 agent 过滤 + 覆盖描述/schema + 注入默认值
-		seedPrompts(m.pg)          // 内置 agent 默认提示词正文播种进 agent_prompts(仅空时)
-		s.seedOrchestrationTools() // P2 跨任务编排工具 seed 进 tools 表(可按 agent 绑定)
+		// M1 执行沙箱（docs §3.2）：ARTEX_SANDBOX=container → Bash 工具改走容器执行
+		// （权限链/guard 门链不变），daemon 不可用时 Bash fail-closed 拒用并红警；
+		// =host 标降级；=off（默认）保持宿主直连基线。任何解析/装配错误都不阻断启动。
+		var bashRedirect func() actool.CoreTool
+		if mode, err := sandbox.ParseMode(os.Getenv("ARTEX_SANDBOX")); err != nil {
+			log.Printf("[sandbox] %v — 保持宿主直连(off)", err)
+		} else if mode != sandbox.ModeOff {
+			p, perr := sandbox.NewProvider(mode)
+			if perr != nil {
+				log.Printf("[sandbox] provider 装配失败(保持 off): %v", perr)
+			} else {
+				m.SetSandboxProvider(p)
+				if p.Type() == "container" {
+					bashRedirect = s.sandboxedBash
+					log.Printf("[sandbox] provider=container：Bash 将路由进沙箱容器（docker 不可用时 fail-closed）")
+				} else {
+					log.Printf("[sandbox] provider=%s degraded=%v：Bash 保持宿主执行", p.Type(), p.Degraded())
+				}
+			}
+		}
+		wireTools(m.pg, domainReg, bashRedirect) // 内置工具表：按 agent 过滤 + 覆盖描述/schema + 注入默认值
+		seedPrompts(m.pg)                        // 内置 agent 默认提示词正文播种进 agent_prompts(仅空时)
+		s.seedOrchestrationTools()               // P2 跨任务编排工具 seed 进 tools 表(可按 agent 绑定)
 		if err := s.seedFindingRetester(); err != nil {
 			log.Printf("[retester] seed: %v", err)
 		}
