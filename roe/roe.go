@@ -124,9 +124,22 @@ func Compile(scopeItems []db.TaskScope, companyAssets []db.Asset) (*Compiled, []
 			}
 			addDomain(d)
 		case "ip":
-			addIP(stripHostPort(s.Net))
-			if s.Value != "" {
-				addIP(stripHostPort(s.Value))
+			v := stripHostPort(s.Net)
+			if v == "" {
+				v = s.Value
+			}
+			// AddAgentScope 会把裸 IP 规范成 host/net（如 10.0.0.5/32），统一按 CIDR 录入。
+			if strings.Contains(v, "/") {
+				addCIDR(v)
+			} else {
+				addIP(v)
+			}
+			if s.Value != "" && s.Value != v {
+				if strings.Contains(s.Value, "/") {
+					addCIDR(stripHostPort(s.Value))
+				} else {
+					addIP(s.Value)
+				}
 			}
 		case "cidr":
 			addCIDR(stripHostPort(s.Net))

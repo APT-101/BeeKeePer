@@ -27,7 +27,7 @@ func (f fakeProvider) Complete(ctx context.Context, req llm.CompletionRequest) (
 func TestAskReturnsCeaseAtAttemptCap(t *testing.T) {
 	prov := fakeProvider{reply: `{"verdict":"continue","reason":"x"}`}
 	res, err := Ask(context.Background(), prov,
-		AskRequest{TaskID: "1", IntentID: 7, Trigger: TrigStuck, Attempt: 2}, 2)
+		AskRequest{TaskID: "1", IntentID: 7, Trigger: TrigStuck, Attempt: 3}, 2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -35,6 +35,18 @@ func TestAskReturnsCeaseAtAttemptCap(t *testing.T) {
 		t.Fatalf("verdict = %v, want cease (attempt cap)", res.Verdict)
 	}
 	// cap hit → provider must NOT be called; f.reply would have been continue.
+}
+
+func TestAskFirstAttemptAllowed(t *testing.T) {
+	// attempt=1, max=1 → 首次质询允许调用模型。
+	res, err := Ask(context.Background(), fakeProvider{reply: `{"verdict":"continue","reason":"[实际操作]a [成功后的后果]b [命中规则]c"}`},
+		AskRequest{TaskID: "1", Trigger: TrigPolicyGate, Attempt: 1}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Verdict != VContinue {
+		t.Fatalf("first attempt must be adjudicated, got %v", res.Verdict)
+	}
 }
 
 func TestAskParsesVerdicts(t *testing.T) {

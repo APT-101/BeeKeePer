@@ -253,6 +253,45 @@ type Manager struct {
 	// capture is on it becomes the MITM's upstream; when capture is off it is
 	// injected into agent bash env / WebFetch directly. See ProxyAddr.
 	globalProxy string
+
+	// M1 escalation bookkeeping: per (taskID:intentID) challenge counts.
+	// escMax is the per-intent limit (docs §5 fallback; default 1 — a blocked
+	// intent gets at most one adjudication before falling back to the existing
+	// blocked path).
+	escMu    sync.Mutex
+	escTries map[string]int
+	escMax   int
+}
+
+// escalationMaxAttempts returns the per-intent adjudication cap.
+func (m *Manager) escalationMaxAttempts() int {
+	m.escMu.Lock()
+	defer m.escMu.Unlock()
+	if m.escMax <= 0 {
+		return 1
+	}
+	return m.escMax
+}
+
+// escalationCap records one challenge attempt for (taskID,intentID) and reports
+// whether it is still within the cap.
+func (m *Manager) escalationCap(taskID, intentID, attempt int64) bool {
+	m.escMu.Lock()
+	defer m.escMu.Unlock()
+	max := m.escMax
+	if max <= 0 {
+		max = 1
+	}
+	if m.escTries == nil {
+		m.escTries = map[string]int{}
+	}
+	key := fmt.Sprintf("%d:%d", taskID, intentID)
+	tries := m.escTries[key]
+	if attempt > int64(max) || tries >= max {
+		return false
+	}
+	m.escTries[key] = tries + 1
+	return true
 }
 
 // Settings keys the UI toggles at runtime.
@@ -836,8 +875,9 @@ func unixNanoOrZero(t *time.Time) int64 {
 	return t.UnixNano()
 }
 
-func taskFromPG(pt *pgdb.Task, store *pgdb.ExplorationStore, ic *intercept.Interceptor, onEvent func(events.Event), polRes func(ctx context.Context) (policy.Level, bool)) *Task {
+func taskFromPG(pt *pgdb.Task, store *pgdb.ExplorationStore, ic *intercept.Interceptor, onEvent func(events.Event), polRes func(ctx context.Context) (policy.Level, bool), eg guard.EgressCheck) *Task {
 	g := guard.NewWithPolicy(ic, polRes)
+	g.SetEgressChecker(eg)
 	g.SetEventPublisher(onEvent)
 	return &Task{
 		ID: strconv.FormatInt(pt.ID, 10), ExpID: pt.ExplorationID,
@@ -914,7 +954,7 @@ func (m *Manager) CreateTaskWithOptions(description, goal string, opts pgdb.Task
 	if err != nil {
 		return nil, err
 	}
-	t := taskFromPG(pt, m.pg.Exploration(pt.ExplorationID), m.interceptor, m.publishEvent, m.m1PolicyLevel)
+	t := taskFromPG(pt, m.pg.Exploration(pt.ExplorationID), m.interceptor, m.publishEvent, m.m1PolicyLevel, m.m1EgressCheck)
 	m.mu.Lock()
 	m.tasks[t.ID] = t
 	m.active = t.ID
@@ -1113,7 +1153,7 @@ func (m *Manager) LoadExisting() []*Task {
 		if _, ok := m.tasks[id]; ok {
 			continue
 		}
-		t := taskFromPG(pt, m.pg.Exploration(pt.ExplorationID), m.interceptor, m.publishEvent, m.m1PolicyLevel)
+		t := taskFromPG(pt, m.pg.Exploration(pt.ExplorationID), m.interceptor, m.publishEvent, m.m1PolicyLevel, m.m1EgressCheck)
 		m.tasks[id] = t
 		loaded = append(loaded, t)
 	}

@@ -1994,6 +1994,12 @@ func (s *Server) taskScopeAdd(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, err.Error())
 		return
 	}
+	// M1: 范围变更后立即重新编译 egress 策略（失败不阻断，下一次启动会重试）。
+	if taskID > 0 {
+		if rerr := s.m.refreshTaskEgress(r.Context(), taskID); rerr != nil {
+			log.Printf("[egress] task %s scope 变更后 egress 编译失败: %v", t.ID, rerr)
+		}
+	}
 	writeJSON(w, 200, ts)
 }
 

@@ -225,6 +225,13 @@ func (s *Server) hasReadyQueuedTask(excludeID string) bool {
 }
 
 func (s *Server) startAdmittedTask(t *Task, mode string) {
+	// M1: 任务真正启动前，按当前 scope + 公司资产重新编译 egress 策略。
+	// 失败不阻断启动（观察期语义：egress 未编译 = 放行）。
+	if id, err := strconv.ParseInt(t.ID, 10, 64); err == nil && id > 0 {
+		if rerr := s.m.refreshTaskEgress(s.ctx, id); rerr != nil {
+			log.Printf("[egress] task %s egress 编译失败: %v", t.ID, rerr)
+		}
+	}
 	if mode == "bootstrap" {
 		if !s.engine.beginTaskOperation(t.ID) {
 			return

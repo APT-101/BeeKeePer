@@ -114,7 +114,7 @@ func Ask(ctx context.Context, prov llm.Provider, req AskRequest, maxAttemptsPerI
 	if maxAttemptsPerIntent <= 0 {
 		maxAttemptsPerIntent = 1
 	}
-	if req.Attempt >= maxAttemptsPerIntent {
+	if req.Attempt > maxAttemptsPerIntent {
 		return Result{
 			Verdict: VCease,
 			Reason:  fmt.Sprintf("质询轮数已达上限(%d)，按收手处理退回既有 blocked 路径", maxAttemptsPerIntent),

@@ -40,6 +40,15 @@ type ToolDenyPayload struct {
 	Reason string `json:"reason,omitempty"`
 }
 
+// EgressViolationPayload is the payload of EvEgressViolation (M1): scope
+// containment was triggered for a tool call. Blocked=false means observe mode
+// (deny_default=false) — the call proceeded but the violation was recorded.
+type EgressViolationPayload struct {
+	Tool    string `json:"tool"`
+	Reason  string `json:"reason,omitempty"`
+	Blocked bool   `json:"blocked"`
+}
+
 // Guard enforces the side-effect policy via agent-core hooks.
 type Guard struct {
 	mu          sync.Mutex
@@ -49,6 +58,7 @@ type Guard struct {
 	interceptor *intercept.Interceptor                         // optional; nil disables user-configured rules
 	onEvent     func(events.Event)                             // M0 platform event bus; nil disables events
 	policyRes   func(ctx context.Context) (policy.Level, bool) // M1 op-policy tier; nil disables the gate
+	egressCheck EgressCheck                                    // M1 egress gate; nil disables
 }
 
 // SetPolicyResolver wires the M1 operation-policy gate. The resolver returns
@@ -60,6 +70,19 @@ type Guard struct {
 func (g *Guard) SetPolicyResolver(res func(ctx context.Context) (policy.Level, bool)) {
 	g.policyRes = res
 }
+
+// EgressCheck decides whether a tool call targets outside the task's compiled
+// egress scope. deny=true → the call is blocked and an EvEgressViolation is
+// emitted; observe=true → the call proceeds (log-only / deny_default=false)
+// but the violation is still emitted; both=false → in-scope or no network
+// target. The check runs AFTER the op-policy gate and BEFORE the intercept
+// chain. The provider is responsible for persisting egress_violations rows
+// (the guard has no db access and stays a pure decision point).
+type EgressCheck func(ctx context.Context, tool string, input json.RawMessage) (deny, observe bool, reason string)
+
+// SetEgressChecker wires the M1 egress gate. Passing nil (default) disables it
+// — the pre-M1 behavior is unchanged.
+func (g *Guard) SetEgressChecker(c EgressCheck) { g.egressCheck = c }
 
 // SetEventPublisher wires the platform event bus (M0). Passing nil disables
 // event emission. The bus is strictly observational — no guard decision
@@ -147,6 +170,20 @@ func (g *Guard) preToolUse(ctx context.Context, ev hook.Event) hook.Result {
 					return g.block(ev.ToolName, systemBlockMessage("人工审批未通过（操作政策档位要求审批）"), cmd)
 				}
 			}
+		}
+	}
+	// M1 egress gate (docs §3.3): AFTER the op-policy gate, BEFORE intercept
+	// rules — scope containment outranks user rules but yields to tiering.
+	if g.egressCheck != nil {
+		deny, observe, reason := g.egressCheck(ctx, ev.ToolName, ev.Input)
+		if deny || observe {
+			g.emit(events.Event{
+				Kind:    events.EvEgressViolation,
+				Payload: EgressViolationPayload{Tool: ev.ToolName, Reason: reason, Blocked: deny},
+			})
+		}
+		if deny {
+			return g.block(ev.ToolName, systemBlockMessage(reason), cmd)
 		}
 	}
 	return g.applyIntercept(ctx, ev)
