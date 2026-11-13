@@ -111,10 +111,16 @@ func (m *Manager) refreshTaskEgress(ctx context.Context, taskID int64) error {
 	if len(compiled.Rules) > 0 {
 		rule = compiled.Rules[0]
 	}
-	return m.pg.UpsertTaskEgress(&db.TaskEgress{
+	if err := m.pg.UpsertTaskEgress(&db.TaskEgress{
 		TaskID: taskID, CompiledFrom: "scope", DenyDefault: true, Version: compiled.Version,
 		AllowDomains: rule.Domains, AllowIPs: rule.IPs, AllowCIDRs: rule.CIDRs, AllowPorts: uint16ToInts(rule.Ports),
-	})
+	}); err != nil {
+		return err
+	}
+	// L4 一致性：策略已变更 → 拆除已缓存的沙箱容器，下次 Bash 调用用新规则重建
+	// （幂等；未建容器的任务无操作）。
+	m.CloseTaskSandbox(context.Background(), strconv.FormatInt(taskID, 10))
+	return nil
 }
 
 // intsToUint16 converts a port slice for roe matching.

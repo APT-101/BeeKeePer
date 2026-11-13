@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Autumn-27/artex/agent"
+	"github.com/Autumn-27/artex/roe"
 	"github.com/Autumn-27/artex/sandbox"
 	"github.com/Autumn-27/norma/permission"
 	actool "github.com/Autumn-27/norma/tool"
@@ -96,6 +97,15 @@ func (s *Server) runSandboxedBash(ctx context.Context, input json.RawMessage, tc
 	spec := sandbox.Spec{
 		Workspace: filepath.Join(s.m.dir, "tasks", taskID),
 		SkillsDir: s.skillDir,
+	}
+	// L4 容器网络级白名单（docs §3.3）：规则来自任务 egress 编译结果，与 guard
+	// egress 门双层一致。未编译/读取失败 → 零规则（网络层对全部出网 fail-closed，
+	// 比命令层更严）。观察模式（deny_default=false）同样应用白名单（网络层无观察语义）。
+	if e, eerr := s.m.pg.GetTaskEgress(ri.TaskID); eerr == nil && e != nil {
+		spec.Egress = []roe.EgressRule{{
+			Domains: e.AllowDomains, IPs: e.AllowIPs, CIDRs: e.AllowCIDRs,
+			Ports: intsToUint16(e.AllowPorts),
+		}}
 	}
 	sb, err := s.m.FetchSandbox(ctx, taskID, spec)
 	if err != nil {

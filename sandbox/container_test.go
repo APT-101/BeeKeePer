@@ -4,9 +4,12 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Autumn-27/artex/roe"
 )
 
 // fakeRunner records docker operations so the provider's parameter mapping is
@@ -222,5 +225,79 @@ func TestContainerProbe(t *testing.T) {
 	}
 	if len(f.execCalls) != 0 {
 		t.Error("probe must not exec in the container")
+	}
+}
+
+func TestContainerProviderNewInstallsEgressWhitelist(t *testing.T) {
+	f := &fakeRunner{createID: "cid-eg"}
+	p := NewContainer(f)
+	sb, err := p.New(context.Background(), "7", Spec{
+		Image:     "artex-sandbox:latest",
+		Workspace: "/home/u/ws",
+		Egress:    []roe.EgressRule{{IPs: []string{"10.0.0.5"}, CIDRs: []string{"192.168.8.0/24"}, Ports: []uint16{443}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sb == nil {
+		t.Fatal("nil sandbox")
+	}
+	if len(f.createCalls) != 1 {
+		t.Fatalf("want 1 create, got %d", len(f.createCalls))
+	}
+	c := f.createCalls[0]
+	if len(c.CapAdd) != 1 || c.CapAdd[0] != "NET_ADMIN" {
+		t.Errorf("cap_add = %v, want [NET_ADMIN]", c.CapAdd)
+	}
+	if len(c.Entry) != 3 || c.Entry[0] != "sh" || c.Entry[1] != "-c" {
+		t.Fatalf("entry = %v", c.Entry)
+	}
+	script := c.Entry[2]
+	for _, want := range []string{
+		"iptables -P OUTPUT DROP",
+		"iptables -A OUTPUT -o lo -j ACCEPT",
+		"--ctstate ESTABLISHED,RELATED",
+		"-p udp --dport 53 -j ACCEPT",
+		"-d 10.0.0.5 -p tcp --dport 443 -j ACCEPT",
+		"-d 10.0.0.5 -p udp --dport 443 -j ACCEPT",
+		"-d 192.168.8.0/24 -p tcp --dport 443 -j ACCEPT",
+		"exec sleep infinity",
+	} {
+		if !strings.Contains(script, want) {
+			t.Errorf("entry script missing %q:\n%s", want, script)
+		}
+	}
+}
+
+func TestBuildEgressEntryNoPortsAllowsAllPorts(t *testing.T) {
+	script, err := buildEgressEntry([]roe.EgressRule{{IPs: []string{"10.0.0.5"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(script, "-d 10.0.0.5 -j ACCEPT") {
+		t.Errorf("no-port rule should allow the IP without port filters:\n%s", script)
+	}
+	if strings.Contains(script, "-d 10.0.0.5 -p tcp --dport") || strings.Contains(script, "-d 10.0.0.5 -p udp --dport") {
+		t.Error("no-port rule must not emit --dport filters for the allowlist target")
+	}
+}
+
+func TestBuildEgressEntryEmptyDenied(t *testing.T) {
+	if _, err := buildEgressEntry([]roe.EgressRule{{Domains: []string{"definitely-not-a-real-host-xyz.invalid"}}}); err == nil {
+		t.Fatal("empty whitelist (all domains failed to resolve) must fail closed")
+	}
+	if _, err := buildEgressEntry([]roe.EgressRule{{}}); err == nil {
+		t.Fatal("no targets must fail closed")
+	}
+}
+
+func TestBuildEgressEntryRuleLimit(t *testing.T) {
+	var many []string
+	for i := 0; i < 60; i++ {
+		many = append(many, "10.0."+strconv.Itoa(i/250)+"."+strconv.Itoa(i%250+1))
+	}
+	_, err := buildEgressEntry([]roe.EgressRule{{IPs: many, Ports: []uint16{80, 443, 22, 53, 8080, 8443, 9000, 3306, 5432, 6379, 27017}}})
+	if err == nil {
+		t.Fatal("oversized whitelist must fail closed")
 	}
 }

@@ -36,6 +36,7 @@ type ContainerConfig struct {
 	ID       string
 	Image    string
 	CapDrop  []string
+	CapAdd   []string // e.g. ["NET_ADMIN"] — netns-local iptables for egress whitelisting
 	ReadOnly bool
 	Tmpfs    []string // e.g. ["/tmp"]
 	Binds    []string // host:container:mode, e.g. ["/host/work:/workspace:ro"]
@@ -91,6 +92,9 @@ func (dockerCLI) Create(ctx context.Context, cfg ContainerConfig) (string, error
 	}
 	for _, c := range cfg.CapDrop {
 		args = append(args, "--cap-drop", c)
+	}
+	for _, c := range cfg.CapAdd {
+		args = append(args, "--cap-add", c)
 	}
 	if cfg.ReadOnly {
 		args = append(args, "--read-only")
@@ -220,6 +224,19 @@ func (p *ContainerProvider) New(ctx context.Context, taskID string, spec Spec) (
 		ReadOnly: true,
 		Env:      spec.EnvAllow,
 		Entry:    []string{"sleep", "infinity"},
+	}
+	// M1 L4 出口白名单（docs §3.3 网络级强制）：容器 netns 内 iptables 默认
+	// OUTPUT DROP，只放行回环/已建立连接/嵌入式 DNS(127.0.0.11) 与白名单目标
+	// （spec.Egress 规则：域解析为 IP、IP、CIDR、端口）。需要 NET_ADMIN（仅
+	// 作用于容器自身 netns，不影响宿主）。规则失败时容器整体 fail-closed
+	// 拒绝创建（iptables 就绪前不放行任何流量）。
+	if len(spec.Egress) > 0 {
+		script, err := buildEgressEntry(spec.Egress)
+		if err != nil {
+			return nil, fmt.Errorf("egress policy 无法编译为容器规则: %w", err)
+		}
+		cfg.CapAdd = append(cfg.CapAdd, "NET_ADMIN")
+		cfg.Entry = []string{"sh", "-c", script}
 	}
 	// 可写 scratch 区（readonly rootfs 下唯一可写目录）。tmpfs 保证容器停止后
 	// 即销毁；/workspace 与 /skills 只读挂载宿主数据。
