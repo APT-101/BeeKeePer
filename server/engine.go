@@ -13,11 +13,33 @@ import (
 
 	"github.com/Autumn-27/artex/agent"
 	"github.com/Autumn-27/artex/db"
+	"github.com/Autumn-27/artex/events"
 	"github.com/Autumn-27/artex/intercept"
 	"github.com/Autumn-27/norma/harness"
 	"github.com/Autumn-27/norma/llm"
 	"github.com/jackc/pgx/v5/pgconn"
 )
+
+// M0 event payloads (see events package for the full Kind catalog).
+
+// PlannerRoundPayload accompanies EvPlannerRound.
+type PlannerRoundPayload struct {
+	Round   int    `json:"round"`
+	Trigger string `json:"trigger,omitempty"` // edge | heartbeat
+}
+
+// IntentClaimPayload accompanies EvIntentClaimed.
+type IntentClaimPayload struct {
+	Worker string `json:"worker"`
+}
+
+// IntentFinishPayload accompanies EvIntentFinished. Action mirrors Engine
+// control registration ("" = completed normally, "pause"/"cancel" = user/planner
+// interrupt), Err reports whether the execution returned an error.
+type IntentFinishPayload struct {
+	Action string `json:"action,omitempty"`
+	Err    bool   `json:"err,omitempty"`
+}
 
 // isFKViolation reports whether err is a Postgres foreign-key violation (SQLSTATE
 // 23503) — e.g. an activity insert whose exploration_id has no parent row.
@@ -138,6 +160,9 @@ type Engine struct {
 	steerBox map[int64][]string
 
 	plannerRound sync.Map // taskID -> int, planner round counter (for UI round separators)
+
+	// bus is the M0 platform event bus (observational; nil disables events).
+	bus *events.Bus
 
 	// 任务级超时(见 docs/任务级超时与收尾设计.md):
 	settling     sync.Map // taskID -> bool, 任务已进入收尾时序(停止派/领新意图)
@@ -635,6 +660,17 @@ func (e *Engine) KillWork(intentID int64) error {
 // Broadcaster exposes the engine's live activity pub/sub (used by the SSE handler).
 func (e *Engine) Broadcaster() *Broadcaster { return e.bc }
 
+// SetBus wires the M0 platform event bus. Passing nil disables event emission;
+// all emit calls are nil-safe no-ops.
+func (e *Engine) SetBus(b *events.Bus) { e.bus = b }
+
+// emit publishes an event via the wired bus (never blocks, never fails).
+func (e *Engine) emit(ev events.Event) {
+	if e.bus != nil {
+		e.bus.Publish(context.Background(), ev)
+	}
+}
+
 // emitActivity persists one captured step AND fans it out to live subscribers,
 // from a single point so storage and the SSE stream never diverge.
 func (e *Engine) emitActivity(t *Task, r db.Activity) db.Activity {
@@ -887,8 +923,14 @@ func (e *Engine) plannerLoop(ctx context.Context, t *Task) {
 		log.Printf("[planner] task %s 规划中…(%s 触发)", t.ID, src)
 		// round marker: each Plan() is one planner round; emit a boundary so the
 		// UI can separate rounds in the transcript (kind='round').
+		round := e.nextPlannerRound(t.ID)
 		e.emitActivity(t, db.Activity{Worker: "planner", Kind: "round",
-			Summary: fmt.Sprintf("第 %d 轮规划", e.nextPlannerRound(t.ID))})
+			Summary: fmt.Sprintf("第 %d 轮规划", round)})
+		e.emit(events.Event{
+			Kind:    events.EvPlannerRound,
+			TaskID:  t.ID,
+			Payload: PlannerRoundPayload{Round: round, Trigger: src},
+		})
 		// what fired this round (worker done / finding; may be several — debounce
 		// coalesces a burst; empty for time/heartbeat wakes).
 		triggers := t.drainTriggers()
@@ -1000,6 +1042,12 @@ func (e *Engine) runIntent(ctx context.Context, t *Task, name string, worker *ag
 	hasChatMessage := message != ""
 	e.stampFirstRun(t) // 首次真正执行 → 盖 first_run_at + 算 deadline(仅带 timeout 的任务)
 	e.touch(t.ID)
+	e.emit(events.Event{
+		Kind:     events.EvIntentClaimed,
+		TaskID:   t.ID,
+		IntentID: intent.ID,
+		Payload:  IntentClaimPayload{Worker: name},
+	})
 	emit := func(r db.Activity) { e.emitActivity(t, r) }
 	ectx := e.clockCtx(e.execContextFor(ctx, t.ID), t, false) // cancellable by Pause; 带任务 deadline
 	if ectx.Err() != nil || e.IsDeleting(t.ID) {
@@ -1069,6 +1117,14 @@ func (e *Engine) runIntent(ctx context.Context, t *Task, name string, worker *ag
 	workCause := context.Cause(workCtx)
 	killed := workCtx.Err() != nil && ectx.Err() == nil
 	action, completeWork := e.detachWork(intent.ID)
+	// M0 observability: one finished event per executed intent, after control
+	// registration is released (action empty = completed normally).
+	e.emit(events.Event{
+		Kind:     events.EvIntentFinished,
+		TaskID:   t.ID,
+		IntentID: intent.ID,
+		Payload:  IntentFinishPayload{Action: action, Err: err != nil},
+	})
 	// A caller may stop waiting and release its in-memory reservation before the
 	// agent honors cancellation. The named context cause remains authoritative and
 	// still settles the stopped run into a recoverable state.

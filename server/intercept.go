@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/Autumn-27/artex/db"
+	"github.com/Autumn-27/artex/events"
 	"github.com/Autumn-27/artex/guard"
 	"github.com/Autumn-27/artex/intercept"
 	"github.com/Autumn-27/norma/llm"
@@ -20,7 +21,11 @@ import (
 // chatGuard returns a guard wired with the manager's interceptor, used for chat
 // conversations. Called once per applyLLM so a new LLM config always gets a fresh guard.
 func (s *Server) chatGuard() *guard.Guard {
-	return guard.NewWithInterceptor(s.m.interceptor)
+	g := guard.NewWithInterceptor(s.m.interceptor)
+	if s.bus != nil {
+		g.SetEventPublisher(func(e events.Event) { s.bus.Publish(context.Background(), e) })
+	}
+	return g
 }
 
 // wireInterceptReviewer installs the LLM fallback judge into the interceptor. The
@@ -123,6 +128,7 @@ func (s *Server) interceptCreateRule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.m.interceptor.Invalidate()
+	s.auditConfig("intercept_rule.create", "intercept_rule", fmt.Sprint(rule.ID), nil, rule)
 	writeJSON(w, 200, rule)
 }
 
@@ -151,6 +157,8 @@ func (s *Server) interceptUpdateRule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.m.interceptor.Invalidate()
+	before, _ := pg.GetInterceptRule(id) // best-effort pre-image for auditing
+	s.auditConfig("intercept_rule.update", "intercept_rule", fmt.Sprint(id), before, rule)
 	writeJSON(w, 200, rule)
 }
 
@@ -164,11 +172,13 @@ func (s *Server) interceptDeleteRule(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, "bad rule id")
 		return
 	}
+	before, _ := pg.GetInterceptRule(id) // snapshot before deleting
 	if err := pg.DeleteInterceptRule(id); err != nil {
 		writeErr(w, 500, err.Error())
 		return
 	}
 	s.m.interceptor.Invalidate()
+	s.auditConfig("intercept_rule.delete", "intercept_rule", fmt.Sprint(id), before, nil)
 	writeJSON(w, 200, map[string]any{"deleted": id})
 }
 
@@ -194,6 +204,8 @@ func (s *Server) interceptToggleRule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.m.interceptor.Invalidate()
+	s.auditConfig("intercept_rule.toggle", "intercept_rule", fmt.Sprint(id),
+		nil, map[string]any{"enabled": req.Enabled})
 	writeJSON(w, 200, map[string]any{"ok": true, "enabled": req.Enabled})
 }
 

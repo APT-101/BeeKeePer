@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Autumn-27/artex/events"
 	"github.com/Autumn-27/artex/intercept"
 	"github.com/Autumn-27/norma/hook"
 )
@@ -27,6 +28,17 @@ type AuditEntry struct {
 	Command string `json:"command,omitempty"`
 }
 
+// ToolCallPayload is the payload of EvToolCalled / EvApprovalRequested.
+type ToolCallPayload struct {
+	Tool string `json:"tool"`
+}
+
+// ToolDenyPayload is the payload of EvToolDenied.
+type ToolDenyPayload struct {
+	Tool   string `json:"tool"`
+	Reason string `json:"reason,omitempty"`
+}
+
 // Guard enforces the side-effect policy via agent-core hooks.
 type Guard struct {
 	mu          sync.Mutex
@@ -34,6 +46,19 @@ type Guard struct {
 	attrib      map[string]int // failure attribution counts (Observer / G5)
 	reg         *hook.Registry
 	interceptor *intercept.Interceptor // optional; nil disables user-configured rules
+	onEvent     func(events.Event)     // M0 platform event bus; nil disables events
+}
+
+// SetEventPublisher wires the platform event bus (M0). Passing nil disables
+// event emission. The bus is strictly observational — no guard decision
+// depends on it.
+func (g *Guard) SetEventPublisher(pub func(events.Event)) { g.onEvent = pub }
+
+// emit publishes e when a publisher is wired (nil-safe, never blocks).
+func (g *Guard) emit(e events.Event) {
+	if g.onEvent != nil {
+		g.onEvent(e)
+	}
 }
 
 // New creates a Guard without user-configured intercept rules (used for pentest
@@ -75,6 +100,10 @@ func (g *Guard) preToolUse(ctx context.Context, ev hook.Event) hook.Result {
 		cmd = in.Text
 	}
 	g.record(ev.ToolName, "allow", "", cmd)
+	g.emit(events.Event{
+		Kind:    events.EvToolCalled,
+		Payload: ToolCallPayload{Tool: ev.ToolName},
+	})
 	return g.applyIntercept(ctx, ev)
 }
 
@@ -102,6 +131,10 @@ func (g *Guard) applyIntercept(ctx context.Context, ev hook.Event) hook.Result {
 	case "deny":
 		// 观测:deny 命中不阻塞审批,直接记一条 denied（历史/任务拦截页可见）。
 		g.interceptor.Log(ctx, intercept.ConvIDFromContext(ctx), dec, ev.ToolName, ev.Input, "denied")
+		g.emit(events.Event{
+			Kind:    events.EvToolDenied,
+			Payload: ToolDenyPayload{Tool: ev.ToolName, Reason: dec.Message},
+		})
 		return g.block(ev.ToolName, systemBlockMessage(dec.Message), "")
 	case "allow":
 		// Record explicit rule and model approvals so review details remain auditable.
@@ -118,6 +151,10 @@ func (g *Guard) applyIntercept(ctx context.Context, ev hook.Event) hook.Result {
 		if !g.interceptor.HandleAsk(ctx, convID, dec, ev.ToolName, ev.Input) {
 			return g.block(ev.ToolName, systemBlockMessage("人工审批未通过（用户拒绝或审批超时）"), "")
 		}
+		g.emit(events.Event{
+			Kind:    events.EvApprovalRequested,
+			Payload: ToolCallPayload{Tool: ev.ToolName},
+		})
 		return hook.Result{}
 	}
 	return hook.Result{}

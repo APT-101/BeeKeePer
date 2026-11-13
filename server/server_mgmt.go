@@ -529,6 +529,8 @@ func (s *Server) pgSavePrompt(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, err.Error())
 		return
 	}
+	s.auditConfig("agent_prompt.save", "agent_prompt", a.Key, nil,
+		map[string]any{"version": ver, "template_len": len(body.Template)})
 	writeJSON(w, 200, map[string]any{"version": ver})
 }
 
@@ -549,6 +551,8 @@ func (s *Server) pgResetPrompt(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, err.Error())
 		return
 	}
+	s.auditConfig("agent_prompt.reset", "agent_prompt", a.Key, nil,
+		map[string]any{"version": ver})
 	writeJSON(w, 200, map[string]any{"version": ver})
 }
 

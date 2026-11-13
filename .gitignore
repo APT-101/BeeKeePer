@@ -58,3 +58,5 @@ Thumbs.db
 /bench/
 /Dockerfile.bench
 /Dockerfile.bench.v2
+# local Go toolchain/module cache (DSH sandbox workaround)
+.go/

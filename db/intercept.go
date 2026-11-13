@@ -71,6 +71,20 @@ func (d *DB) ListInterceptRules() ([]InterceptRule, error) {
 	return out, rows.Err()
 }
 
+// GetInterceptRule returns one rule by id (nil when absent). Used by config
+// auditing to snapshot the before-image of an update/delete.
+func (d *DB) GetInterceptRule(id int64) (*InterceptRule, error) {
+	row := d.QueryRow(`SELECT `+interceptRuleCols+` FROM intercept_rules WHERE id=$1`, id)
+	r, err := scanInterceptRule(row)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &r, nil
+}
+
 // CreateInterceptRule inserts a new rule.
 func (d *DB) CreateInterceptRule(name, matchTarget, matchType, pattern, action, message string, priority int, enabled bool, timeoutEnabled bool, timeoutSeconds int, timeoutAction string) (InterceptRule, error) {
 	row := d.QueryRow(`

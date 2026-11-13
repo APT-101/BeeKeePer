@@ -1215,3 +1215,17 @@ CREATE INDEX IF NOT EXISTS idx_side_requests_history ON side_question_requests(s
 -- Additive v3 archive fields; old archives restore these as empty objects.
 ALTER TABLE side_question_sessions ADD COLUMN IF NOT EXISTS memory JSONB NOT NULL DEFAULT '{}';
 ALTER TABLE side_question_requests ADD COLUMN IF NOT EXISTS context_info JSONB NOT NULL DEFAULT '{}';
+
+-- ── M0-2 配置变更审计（谁在何时改了什么）──────────────────────────────────────
+CREATE TABLE IF NOT EXISTS config_audit_log (
+    id            BIGSERIAL PRIMARY KEY,
+    actor         TEXT NOT NULL,
+    action        TEXT NOT NULL,
+    resource_type TEXT NOT NULL,
+    resource_id   TEXT,
+    before        JSONB NOT NULL DEFAULT '{}',
+    after         JSONB NOT NULL DEFAULT '{}',
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_config_audit_resource ON config_audit_log(resource_type, resource_id);
+CREATE INDEX IF NOT EXISTS idx_config_audit_created ON config_audit_log(created_at DESC);

@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"sort"
 	"strconv"
@@ -21,14 +22,28 @@ import (
 
 	"github.com/Autumn-27/artex/agent"
 	"github.com/Autumn-27/artex/db"
+	"github.com/Autumn-27/artex/events"
 	"github.com/Autumn-27/artex/intercept"
 	"github.com/Autumn-27/artex/llmpool"
 	"github.com/Autumn-27/artex/llmrec"
+	"github.com/Autumn-27/artex/metrics"
 	"github.com/Autumn-27/artex/report"
 	"github.com/Autumn-27/norma/llm"
 	actool "github.com/Autumn-27/norma/tool"
 	"github.com/Autumn-27/norma/transcript"
 )
+
+// ConfigChangedPayload is the payload of EvConfigChanged; the M0 audit sink
+// persists it into config_audit_log. Actor is the API caller (user/agent key);
+// Before/After are the JSON snapshots of the mutated resource.
+type ConfigChangedPayload struct {
+	Actor        string `json:"actor"`
+	Action       string `json:"action"`
+	ResourceType string `json:"resource_type"`
+	ResourceID   string `json:"resource_id,omitempty"`
+	Before       any    `json:"before,omitempty"`
+	After        any    `json:"after,omitempty"`
+}
 
 // BuildVersion is the backend application version, injected from cmd/artex at
 // startup (which in turn gets it from -ldflags "-X main.version=<tag>").
@@ -41,6 +56,11 @@ type Server struct {
 	m      *Manager
 	engine *Engine
 	ctx    context.Context
+
+	// bus is the M0 platform event bus; metrics is its Prometheus-text registry.
+	// Both are created in New and owned by the Server for its lifetime.
+	bus     *events.Bus
+	metrics *metrics.Registry
 
 	skillDir string // root directory for skill subdirectories
 	jwtKey   []byte // HS256 signing key loaded from / generated into dataDir/jwt.key
@@ -162,6 +182,23 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string, keyDi
 		provByProfile: map[int64]*provEntry{}, llmHealth: newLLMHealthRegistry(m.pg),
 		taskAgents: map[string]*taskAgentBundle{}, archiveWake: make(chan struct{}, 1)}
 	s.initSideQuestions()
+	// M0 platform observability: one in-process bus + one metrics registry. The
+	// bus is strictly observational (publish is fire-and-forget), so wiring it
+	// cannot change any enforcement behavior.
+	s.bus = events.New(events.WithBuffer(512))
+	s.metrics = metrics.NewRegistry()
+	m.bus = s.bus // task guards publish through the manager
+	s.engine.SetBus(s.bus)
+	s.bus.Subscribe(nil, 0, s.metricsSink) // count every event by kind
+	if m.pg != nil {
+		// Config changes land in config_audit_log (M0-2). The sink is best
+		// effort: a DB error is logged by the bus and never blocks the publisher.
+		s.bus.Subscribe([]events.Kind{events.EvConfigChanged}, 0,
+			func(ctx context.Context, ev events.Event) error {
+				p, _ := ev.Payload.(ConfigChangedPayload)
+				return m.pg.LogConfigChange(p.Actor, p.Action, p.ResourceType, p.ResourceID, p.Before, p.After)
+			})
+	}
 	// 熔断阈值/冷却是失败路径上的热参数，启动时把全局重试策略推给 Registry 一次；
 	// 之后每次保存策略再推一次（saveLLMRetryPolicy）。
 	s.applyRetryPolicy()
@@ -1005,8 +1042,43 @@ func (s *Server) Handler() http.Handler {
 	api := cors(s.requireAuth(mux))
 	root := http.NewServeMux()
 	root.Handle("/api/", api)
+	// M0: aggregating counters only — no task data — so it can stay public
+	// (matches the docs: /metrics scraped by Prometheus, no auth required).
+	root.Handle("/metrics", s.metricsHandler())
 	root.Handle("/", s.webuiHandler())
 	return root
+}
+
+// metricsSink counts every published event by kind into the M0 registry.
+func (s *Server) metricsSink(_ context.Context, ev events.Event) error {
+	s.metrics.Counter("artex_events_published_total",
+		"Platform events published to the M0 bus.", "kind").Inc(1, string(ev.Kind))
+	return nil
+}
+
+// metricsHandler refreshes bus gauges before serving the registry as Prometheus
+// text (scraper pulls cause the refresh, so no background ticker is needed).
+func (s *Server) metricsHandler() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		st := s.bus.Stats()
+		s.metrics.Gauge("artex_bus_published_total", "Events accepted by the M0 bus.").Set(float64(st.Published))
+		s.metrics.Gauge("artex_bus_dropped_total", "Events dropped from a full subscriber buffer.").Set(float64(st.Dropped))
+		s.metrics.Gauge("artex_bus_subscribers", "Active M0 bus subscribers.").Set(float64(st.Subs))
+		s.metrics.Handler().ServeHTTP(w, r)
+	})
+}
+
+// auditConfig publishes EvConfigChanged so the M0 sink persists it into
+// config_audit_log. Fire-and-forget; a missing bus is a no-op. Call it AFTER a
+// mutation has committed, with the pre-image (before) when one was read.
+func (s *Server) auditConfig(action, resourceType, resourceID string, before, after any) {
+	if s.bus == nil {
+		return
+	}
+	s.bus.Publish(context.Background(), events.Event{
+		Kind:    events.EvConfigChanged,
+		Payload: ConfigChangedPayload{Actor: "ARTEX", Action: action, ResourceType: resourceType, ResourceID: resourceID, Before: before, After: after},
+	})
 }
 
 // --- handlers ---
@@ -3223,6 +3295,22 @@ func (s *Server) settingsPayload() map[string]any {
 	}
 }
 
+// settingsTouchedFields flattens a PUT /api/settings request into the set of
+// fields the caller actually provided (non-nil pointers). Used by the M0 config
+// audit sink so a settings.update record shows exactly which toggles changed.
+func settingsTouchedFields(req any) map[string]any {
+	v := reflect.ValueOf(req)
+	out := map[string]any{}
+	for i := 0; i < v.NumField(); i++ {
+		f := v.Field(i)
+		if f.Kind() == reflect.Ptr && !f.IsNil() {
+			jsonTag := v.Type().Field(i).Tag.Get("json")
+			out[strings.Split(jsonTag, ",")[0]] = f.Elem().Interface()
+		}
+	}
+	return out
+}
+
 // pgDetectPython re-runs interpreter detection, stores + returns it.
 func (s *Server) pgDetectPython(w http.ResponseWriter, r *http.Request) {
 	p := detectPython()
@@ -3234,6 +3322,7 @@ func (s *Server) pgDetectPython(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, err.Error())
 		return
 	}
+	s.auditConfig("settings.detect_python", "settings", "python_interpreter", nil, map[string]any{"path": p})
 	writeJSON(w, 200, map[string]any{"python_interpreter": p})
 }
 
@@ -3272,6 +3361,9 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, err.Error())
 		return
 	}
+	// M0 audit: record the attempted settings change (which toggles were sent),
+	// even if a later field fails validation — the attempt itself is observable.
+	s.auditConfig("settings.update", "settings", "global", nil, settingsTouchedFields(req))
 	if req.ConstraintsInjectPlanner != nil {
 		if err := s.m.pg.SetBool(settingConstraintsInjectPlanner, *req.ConstraintsInjectPlanner); err != nil {
 			writeErr(w, 500, err.Error())
