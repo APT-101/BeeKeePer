@@ -381,9 +381,11 @@ func (p *Planner) Plan(ctx context.Context, taskID int64, as *db.AssetStore, ts 
 	if p.wantConstraints() {
 		sysBody += constraintBlock(ts) // 操作约束(若有)注入系统提示,框定探索边界
 	}
+	lessonText := ""
 	if p.lessonProv != nil {
 		if lessons, lerr := p.lessonProv(ctx, taskID); lerr == nil {
-			sysBody += renderLessons(lessons) // M2-3 跨任务经验注入
+			lessonText = renderLessons(lessons) // M2-3 跨任务经验注入
+			sysBody += lessonText
 		}
 	}
 	system, boundary := deferredSystem(sysBody, def)
@@ -451,8 +453,23 @@ func (p *Planner) Plan(ctx context.Context, taskID int64, as *db.AssetStore, ts 
 			lead = "本轮是**定时巡检（心跳到点）**的唤醒,且当前**已没有任何 open 或 running 的意图**——没有 worker 在跑、也没有排队中的方向,探索已停摆。你**必须**在本轮产出一个或多个向目标推进、且与图中既有意图**互不重复**的新意图(不得产出 0 意图);先据下面的态势判定目标是否已达成,未达成则立即补方向："
 		}
 	}
-	input := lead + situational + "\n\n据上面的态势，判定目标。目标已【真正达成】（已拿到目标成果/已确认目标漏洞）时用 prove_goal 逐个标记。**硬底线：只要目标尚未达成、且当前没有任何 open 或 running 意图（frontier_open=0 且 running_intents 为空），本轮就必须产出至少一个向目标推进的意图——此时没有在跑的 work 可等、也没有在排队的方向，产出 0 意图=任务停摆。仅当已有 open/running 意图在推进、或目标已达成时，本轮才可以不产出新意图。**" +
-		renderPlannerTodos(opts.Todos.List())
+	input := lead + situational + "\n\n据上面的态势，判定目标。目标已【真正达成】（已拿到目标成果/已确认目标漏洞）时用 prove_goal 逐个标记。**硬底线：只要目标尚未达成、且当前没有任何 open 或 running 意图（frontier_open=0 且 running_intents 为空），本轮就必须产出至少一个向目标推进的意图——此时没有在跑的 work 可等、也没有在排队的方向，产出 0 意图=任务停摆。仅当已有 open/running 意图在推进、或目标已达成时，本轮才可以不产出新意图。**"
+	if len(opts.Todos.List()) > 0 {
+		input += renderPlannerTodos(opts.Todos.List())
+	}
+	// M2-4 上下文构成清单（决策可解释性）：本轮喂了哪些块 + token 估算 +
+	// cold-digest 折叠情况（折叠≠丢失，expand_digest 可取回）。
+	todoText := renderPlannerTodos(opts.Todos.List())
+	digestCount, covered := 0, 0
+	if ds, _ := tsx.coldDigestOverview(); ds != nil {
+		digestCount = len(ds)
+		for _, d := range ds {
+			if mc, ok := d["member_count"].(float64); ok {
+				covered += int(mc)
+			}
+		}
+	}
+	input += composePlannerManifest(situational, todoText, lessonText, digestCount, covered)
 	// MaxDuration 现在会在墙钟到点打断在跑工具并就地进收尾(在活 ctx 上),单轮卡死不再
 	// 绕过收尾,无需外部硬 ctx 兜底。ctx 只承载 pause / kill / shutdown。
 	_, _, err = captureRun(ctx, opts, input,
