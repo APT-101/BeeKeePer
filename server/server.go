@@ -502,6 +502,9 @@ func (s *Server) buildPlannerWorker(pinID *int64, gProv llm.Provider, gCfg agent
 	// model (§4 uses the running agent's model). Uses Complete (non-streaming) for
 	// the one-shot body summarization.
 	pl.SetCompactor(agent.NewCompactor(pProv, pCfg.Model))
+	// M2 状态与记忆：规划待办落库（DB 为真值）+ 跨任务经验注入。
+	pl.SetTodoPersist(&pgTodoPersist{d: s.m.pg})
+	pl.SetLessonProvider(s.lessonInjector)
 	return pl, wk
 }
 

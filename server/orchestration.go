@@ -78,7 +78,8 @@ func (s *Server) orchestrationTools() []actool.CoreTool {
 		s.toolUpdateFindingReport(),
 		s.toolGetFindingTraffic(),
 		s.toolBindFindingTraffic(),
-		s.toolEscalate(), // M1 质询通道（ADR-003）：安全门拦截后的单次裁决
+		s.toolEscalate(),     // M1 质询通道（ADR-003）：安全门拦截后的单次裁决
+		s.toolRecordLesson(), // M2 经验库：跨任务教训沉淀
 	}
 }
 

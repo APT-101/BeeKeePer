@@ -1267,3 +1267,42 @@ CREATE TABLE IF NOT EXISTS egress_violations (
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_egress_viol_task ON egress_violations(task_id, created_at DESC);
+
+-- =====================================================================
+-- §M2 状态与记忆（M2-1 规划待办落库 / M2-3 跨任务经验库）
+-- =====================================================================
+
+-- M2-1 攻击链 todolist 落库：planner 内存 TodoStore 的持久化副作用（轮末全量
+-- 替换），任务恢复/服务重启时按 exploration_id 重建。status 与 norma TodoStatus
+-- 对齐（pending/in_progress/completed），另预留 blocked/dropped 供未来映射。
+CREATE TABLE IF NOT EXISTS todo_items (
+    id                    BIGSERIAL PRIMARY KEY,
+    exploration_id        BIGINT NOT NULL REFERENCES explorations(id) ON DELETE CASCADE,
+    seq                   INT NOT NULL,
+    title                 TEXT NOT NULL,
+    status                TEXT NOT NULL DEFAULT 'pending'
+                          CHECK (status IN ('pending','in_progress','completed','blocked','dropped')),
+    depends_on            BIGINT[] NOT NULL DEFAULT '{}',
+    satisfied_by_fact_id  BIGINT REFERENCES exploration_nodes(id) ON DELETE SET NULL,
+    blocked_reason        TEXT,
+    note                  TEXT NOT NULL DEFAULT '',
+    version               INT NOT NULL DEFAULT 0,           -- 乐观锁（planner 并发轮写）
+    created_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (exploration_id, seq)
+);
+CREATE INDEX IF NOT EXISTS idx_todo_exp ON todo_items(exploration_id, status);
+
+-- M2-3 跨任务经验库：lessons 沉淀（worker 撞墙/绕过/误配等），planner 唤醒时可
+-- 选注入。source_task_id 空 = 人工沉淀（无任务上下文）。
+CREATE TABLE IF NOT EXISTS lesson_notes (
+    id               BIGSERIAL PRIMARY KEY,
+    source_task_id   BIGINT REFERENCES tasks(id) ON DELETE SET NULL,
+    source_intent_id BIGINT,
+    kind             TEXT NOT NULL CHECK (kind IN ('blocked','exhausted','waf','lesson','misconfig')),
+    summary          TEXT NOT NULL,
+    detail           JSONB NOT NULL DEFAULT '{}',
+    tags             TEXT[] NOT NULL DEFAULT '{}',
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_lesson_tags ON lesson_notes USING GIN(tags);

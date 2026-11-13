@@ -46,6 +46,10 @@ type Planner struct {
 	// dispatch it step-by-step over rounds instead of front-loading it in parallel.
 	todoMu sync.Mutex
 	todos  map[int64]*actool.TodoStore
+
+	// M2 状态与记忆：todo 落库（DB 为真值）与跨任务经验注入；nil = 关闭。
+	todoPersist TodoPersist
+	lessonProv  LessonProvider
 }
 
 func NewPlanner(prov llm.Provider, model, workDir string, tx *transcript.Store, window, maxTurns int) *Planner {
@@ -103,18 +107,7 @@ func (p *Planner) SetConstraintInject(fn func() bool) { p.injectConstraints = fn
 // wantConstraints reports whether constraint injection is enabled (default yes).
 func (p *Planner) wantConstraints() bool { return p.injectConstraints == nil || p.injectConstraints() }
 
-// todoFor returns the task's persistent planning todo store, creating it on first
-// use. Shared across all of this task's planner wake-ups.
-func (p *Planner) todoFor(expID int64) *actool.TodoStore {
-	p.todoMu.Lock()
-	defer p.todoMu.Unlock()
-	s := p.todos[expID]
-	if s == nil {
-		s = actool.NewTodoStore()
-		p.todos[expID] = s
-	}
-	return s
-}
+// todoFor / SetTodoPersist / SetLessonProvider / renderLessons 见 todopersist.go（M2）。
 
 // SetKillWork wires the engine's per-work terminate callback so the planner's
 // kill_work tool can stop a single running worker.
@@ -388,6 +381,11 @@ func (p *Planner) Plan(ctx context.Context, taskID int64, as *db.AssetStore, ts 
 	if p.wantConstraints() {
 		sysBody += constraintBlock(ts) // 操作约束(若有)注入系统提示,框定探索边界
 	}
+	if p.lessonProv != nil {
+		if lessons, lerr := p.lessonProv(ctx, taskID); lerr == nil {
+			sysBody += renderLessons(lessons) // M2-3 跨任务经验注入
+		}
+	}
 	system, boundary := deferredSystem(sysBody, def)
 	// planner 无自身墙钟预算;有 deadline 时把 MaxDuration 夹逼到剩余,让在跑的规划轮在
 	// 任务到点时进收尾(因超时→任务超时词,因步数→per-run 词)。
@@ -424,7 +422,8 @@ func (p *Planner) Plan(ctx context.Context, taskID int64, as *db.AssetStore, ts 
 		MaxDuration:           maxDur,     // 0=不限;有 deadline 时=距 deadline 剩余
 		Compaction:            compactionConfig(p.compactionWindow()),
 		// 跨唤醒共享的规划待办：让串行链在多轮之间保留（session 是新的，store 不是）。
-		Todos: p.todoFor(ts.ID()),
+		// M2-1：todoPersist 装配后首次唤醒从 DB 恢复。
+		Todos: p.todoFor(ctx, ts.ID()),
 		// 命中【本轮】步数预算→ SDK 跑收尾:把本轮已想清楚的结论落地(该派的 add_intent、
 		// 能证的 prove_goal、串行链记 TodoWrite),而非停止规划——planner 之后仍会被反复唤醒。
 		// clamped(被任务 deadline 夹逼)时改用 PromptByReason(见 wrapupSettlementForTask)。
@@ -463,5 +462,7 @@ func (p *Planner) Plan(ctx context.Context, taskID int64, as *db.AssetStore, ts 
 				emit(r)
 			}
 		})
+	// M2-1：规划待办轮末落库（DB 为真值 → 服务重启/任务恢复后按 exploration_id 重建）。
+	p.syncTodos(ctx, ts.ID())
 	return tsx.GoalMet, tsx.Reason, err
 }
