@@ -21,7 +21,7 @@ import (
 // chatGuard returns a guard wired with the manager's interceptor, used for chat
 // conversations. Called once per applyLLM so a new LLM config always gets a fresh guard.
 func (s *Server) chatGuard() *guard.Guard {
-	g := guard.NewWithInterceptor(s.m.interceptor)
+	g := guard.NewWithPolicy(s.m.interceptor, s.m.m1PolicyLevel)
 	if s.bus != nil {
 		g.SetEventPublisher(func(e events.Event) { s.bus.Publish(context.Background(), e) })
 	}

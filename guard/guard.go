@@ -16,6 +16,7 @@ import (
 
 	"github.com/Autumn-27/artex/events"
 	"github.com/Autumn-27/artex/intercept"
+	"github.com/Autumn-27/artex/policy"
 	"github.com/Autumn-27/norma/hook"
 )
 
@@ -45,8 +46,19 @@ type Guard struct {
 	audit       []AuditEntry
 	attrib      map[string]int // failure attribution counts (Observer / G5)
 	reg         *hook.Registry
-	interceptor *intercept.Interceptor // optional; nil disables user-configured rules
-	onEvent     func(events.Event)     // M0 platform event bus; nil disables events
+	interceptor *intercept.Interceptor                         // optional; nil disables user-configured rules
+	onEvent     func(events.Event)                             // M0 platform event bus; nil disables events
+	policyRes   func(ctx context.Context) (policy.Level, bool) // M1 op-policy tier; nil disables the gate
+}
+
+// SetPolicyResolver wires the M1 operation-policy gate. The resolver returns
+// the current task's tier from the hook ctx, plus ok=false when the task is
+// unknown or policy gating is off for this run. Passing nil (default) disables
+// the gate entirely — the pre-M1 behavior is unchanged. The gate runs BEFORE
+// the intercept chain and only hard-acts at non-full tiers; full/unknown tiers
+// fall through to the existing chain untouched.
+func (g *Guard) SetPolicyResolver(res func(ctx context.Context) (policy.Level, bool)) {
+	g.policyRes = res
 }
 
 // SetEventPublisher wires the platform event bus (M0). Passing nil disables
@@ -73,6 +85,15 @@ func newGuard(ic *intercept.Interceptor) *Guard {
 	g.reg = hook.NewRegistry().
 		On(hook.PreToolUse, g.preToolUse).
 		On(hook.PostToolUse, g.postToolUse)
+	return g
+}
+
+// NewWithPolicy builds a Guard with both user intercept rules and the M1
+// operation-policy gate wired. pol may be nil (gate off) for parity with
+// NewWithInterceptor.
+func NewWithPolicy(ic *intercept.Interceptor, pol func(ctx context.Context) (policy.Level, bool)) *Guard {
+	g := newGuard(ic)
+	g.policyRes = pol
 	return g
 }
 
@@ -104,7 +125,51 @@ func (g *Guard) preToolUse(ctx context.Context, ev hook.Event) hook.Result {
 		Kind:    events.EvToolCalled,
 		Payload: ToolCallPayload{Tool: ev.ToolName},
 	})
+	// M1 operation-policy gate (docs §3.4): runs BEFORE the intercept chain.
+	// At passive/active tiers a non-allow decision here short-circuits to block
+	// or to the approval flow; full/unknown tiers fall through untouched.
+	if g.policyRes != nil {
+		if level, ok := g.policyRes(ctx); ok && level != policy.Full {
+			dec, reason := policy.Gate(ev.ToolName, ev.Input, level)
+			switch dec {
+			case policy.Deny:
+				g.emit(events.Event{
+					Kind:    events.EvToolDenied,
+					Payload: ToolDenyPayload{Tool: ev.ToolName, Reason: reason},
+				})
+				return g.block(ev.ToolName, systemBlockMessage(reason), cmd)
+			case policy.Ask:
+				if !g.policyAsk(ctx, ev.ToolName, ev.Input, reason) {
+					g.emit(events.Event{
+						Kind:    events.EvToolDenied,
+						Payload: ToolDenyPayload{Tool: ev.ToolName, Reason: "审批未通过（操作政策档位要求审批）"},
+					})
+					return g.block(ev.ToolName, systemBlockMessage("人工审批未通过（操作政策档位要求审批）"), cmd)
+				}
+			}
+		}
+	}
 	return g.applyIntercept(ctx, ev)
+}
+
+// policyAsk implements the active-tier "degrade to approval" path by reusing
+// the intercept approval flow. When no interceptor is wired (or the tool is
+// not intercept-enabled) the gate fails SAFE: approval is impossible, so the
+// call is denied rather than silently allowed.
+func (g *Guard) policyAsk(ctx context.Context, tool string, input json.RawMessage, reason string) bool {
+	if g.interceptor == nil || !g.interceptor.IsToolEnabled(tool) || ctx.Err() != nil {
+		return false
+	}
+	dec := intercept.Decision{Action: "ask", Message: reason}
+	convID := intercept.ConvIDFromContext(ctx)
+	if !g.interceptor.HandleAsk(ctx, convID, dec, tool, input) {
+		return false
+	}
+	g.emit(events.Event{
+		Kind:    events.EvApprovalRequested,
+		Payload: ToolCallPayload{Tool: tool},
+	})
+	return true
 }
 
 // applyIntercept evaluates user-configured intercept rules against the tool call.

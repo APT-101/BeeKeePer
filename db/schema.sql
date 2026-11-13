@@ -1229,3 +1229,41 @@ CREATE TABLE IF NOT EXISTS config_audit_log (
 );
 CREATE INDEX IF NOT EXISTS idx_config_audit_resource ON config_audit_log(resource_type, resource_id);
 CREATE INDEX IF NOT EXISTS idx_config_audit_created ON config_audit_log(created_at DESC);
+
+-- =====================================================================
+-- N. M1 执行安全层（docs §3.3/§3.4）：操作政策档位 + RoE 出网策略产物
+-- =====================================================================
+
+-- M1-2 操作政策档位（passive 只读侦察 / active 主动探测审批 / full 基线放开）。
+-- 列级 CHECK 约束无法用 ADD COLUMN IF NOT EXISTS 幂等重建；默认 full 保证存量任务无感。
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS op_policy TEXT NOT NULL DEFAULT 'full'
+    CHECK (op_policy IN ('passive','active','full'));
+
+-- M1-1a RoE 出网策略编译产物（task_scope + company 资产 → 允许清单；默认 deny-all）。
+--    compiled_from: scope / policy / manual（追踪规则来源，人工复核后可切 enforce）
+--    deny_default: true=未命中即阻断（enforce）；false=观察模式，只记 violation 不阻断。
+CREATE TABLE IF NOT EXISTS task_egress (
+    id             BIGSERIAL PRIMARY KEY,
+    task_id        BIGINT NOT NULL UNIQUE REFERENCES tasks(id) ON DELETE CASCADE,
+    compiled_from  TEXT NOT NULL DEFAULT 'scope',
+    allow_domains  TEXT[] NOT NULL DEFAULT '{}',
+    allow_ips      INET[] NOT NULL DEFAULT '{}',
+    allow_cidrs    CIDR[] NOT NULL DEFAULT '{}',
+    allow_ports    INT[]  NOT NULL DEFAULT '{}',
+    deny_default   BOOLEAN NOT NULL DEFAULT true,
+    version        INT NOT NULL DEFAULT 0,
+    updated_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- M1-1b 出网违反记录：命中未授权目标一次一行，blocked=false 表示观察模式下未阻断。
+CREATE TABLE IF NOT EXISTS egress_violations (
+    id          BIGSERIAL PRIMARY KEY,
+    task_id     BIGINT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    intent_id   BIGINT,
+    tool        TEXT NOT NULL,
+    target      TEXT NOT NULL,
+    reason      TEXT NOT NULL,
+    blocked     BOOLEAN NOT NULL DEFAULT true,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_egress_viol_task ON egress_violations(task_id, created_at DESC);
