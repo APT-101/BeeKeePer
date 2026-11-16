@@ -1306,3 +1306,38 @@ CREATE TABLE IF NOT EXISTS lesson_notes (
     created_at       TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_lesson_tags ON lesson_notes USING GIN(tags);
+
+-- =====================================================================
+-- §M3 平台治理（M3 凭证保险库）
+-- =====================================================================
+
+-- M3 凭证保险库：任务内授权凭据（ssh/login/api_key 等）集中加密存储。
+-- secret_enc 是 AES-256-GCM 密文（用 artex 主密钥，密钥文件在 dataDir，chmod
+-- 600），明文只出现在 REST 写/授权读与 agent 取用工具的瞬时结果里。
+CREATE TABLE IF NOT EXISTS credential_vault (
+    id           BIGSERIAL PRIMARY KEY,
+    name         TEXT NOT NULL UNIQUE,          -- 唯一引用名（agent 用 get_credential 按名取）
+    kind         TEXT NOT NULL DEFAULT 'other'
+                 CHECK (kind IN ('ssh','login','api_key','token','other')),
+    host         TEXT,                          -- 适用目标（主机/站点，可空=通用）
+    username     TEXT,                          -- 登录名/密钥名（可空）
+    secret_enc   BYTEA NOT NULL,                -- AES-256-GCM(nonce||ciphertext) 密文
+    notes        TEXT NOT NULL DEFAULT '',
+    created_by   TEXT NOT NULL DEFAULT '',
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_vault_host ON credential_vault(host);
+
+-- 凭据取用审计：agent 每次 get_credential 落一条（谁在哪个任务/意图取用了什么），
+-- 明文不落审计，只记元数据与取用方。
+CREATE TABLE IF NOT EXISTS credential_access_log (
+    id             BIGSERIAL PRIMARY KEY,
+    credential_id  BIGINT NOT NULL REFERENCES credential_vault(id) ON DELETE CASCADE,
+    task_id        BIGINT,
+    intent_id      BIGINT,
+    worker         TEXT NOT NULL DEFAULT '',
+    tool_use_id    TEXT NOT NULL DEFAULT '',
+    at             TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_cred_access ON credential_access_log(credential_id, at DESC);

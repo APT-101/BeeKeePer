@@ -921,6 +921,13 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/exploration/findings/{id}", s.deleteFinding)
 	mux.HandleFunc("GET /api/exploration/intents", s.intents)
 	mux.HandleFunc("GET /api/exploration/decisions", s.decisions) // M3 planner 决策卡
+
+	// M3 凭证保险库（/api/vault/*，JWT 保护）
+	mux.HandleFunc("PUT /api/vault/credentials", s.vaultPut)
+	mux.HandleFunc("GET /api/vault/credentials", s.vaultList)
+	mux.HandleFunc("GET /api/vault/credentials/{name}", s.vaultGet)
+	mux.HandleFunc("DELETE /api/vault/credentials/{id}", s.vaultDelete)
+	mux.HandleFunc("GET /api/vault/credentials/{id}/access", s.vaultAccess)
 	mux.HandleFunc("GET /api/exploration/graph", s.explorationGraph)
 	mux.HandleFunc("GET /api/exploration/activity", s.activity)
 	mux.HandleFunc("GET /api/exploration/activity/history", s.activityHistory)
