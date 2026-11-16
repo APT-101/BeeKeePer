@@ -489,6 +489,17 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 	if strings.TrimSpace(input) == "" {
 		input = "开始执行 system 里领到的意图：只做它、只产生事实、assets、finding、做完即停。"
 	}
+	// M2-4 对称补完：worker 首轮 user 消息尾追加上下文构成清单（透明列出本轮
+	// 喂入的块 + cold-digest 折叠情况；resume 续跑沿用 transcript 不重复注入）。
+	if ds, _ := tsx.coldDigestOverview(); ds != nil {
+		covered := 0
+		for _, d := range ds {
+			if mc, ok := d["member_count"].(float64); ok {
+				covered += int(mc)
+			}
+		}
+		input += composeWorkerManifest(overview, len(ds), covered, w.wantConstraints())
+	}
 
 	// 实验功能:开启后由 noa 接管上下文压缩(归档集中在 <workDir>/noa/<SessionID> 下,持久)。
 	noaSession := WorkerSessionID(ts.ID(), intent.ID)

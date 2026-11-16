@@ -44,6 +44,26 @@ func TestRenderContextManifestFormat(t *testing.T) {
 	}
 }
 
+func TestComposeWorkerManifest(t *testing.T) {
+	out := composeWorkerManifest("overview-text", 1, 3, true)
+	for _, want := range []string{
+		"worker_overview（任务全局态势）", "intent_mandate（本意图/启动指令/锚定资产）",
+		"constraints（操作约束）", "1 个 digest 折叠了 3 条冷节点", "已折叠",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("worker manifest missing %q:\n%s", want, out)
+		}
+	}
+	// 空 overview → 跳过 overview 块（仅保留意图/约束/冷区）
+	out2 := composeWorkerManifest("", 0, 0, false)
+	if strings.Contains(out2, "worker_overview") || strings.Contains(out2, "constraints") || strings.Contains(out2, "已折叠") {
+		t.Errorf("empty overview/constraints/digests must be omitted:\n%s", out2)
+	}
+	if !strings.Contains(out2, "intent_mandate") {
+		t.Error("intent_mandate must always be listed")
+	}
+}
+
 func TestComposePlannerManifest(t *testing.T) {
 	out := composePlannerManifest("situation-text", "todo-text", "lesson-text", 2, 7)
 	if !strings.Contains(out, "graph_overview（本任务态势）") {

@@ -94,3 +94,37 @@ func composePlannerManifest(situational, todoText, lessonText string, digestCoun
 	})
 	return renderContextManifest(blocks)
 }
+
+// composeWorkerManifest 组装 worker 轮次的构成清单（M2-4 对称补完）：worker
+// 的意图与启动指令全量在 system prompt 里（刻意不压缩），清单只透明列出本轮
+// 喂入的块与冷区折叠情况，提醒「被折叠≠丢失」。overview 为空（降级启动词）时
+// 跳过 overview 块。仅首轮（fresh run）注入；resume 续跑沿用 transcript。
+func composeWorkerManifest(overview string, digestCount, covered int, hasConstraints bool) string {
+	blocks := []ContextBlock{}
+	if strings.TrimSpace(overview) != "" {
+		blocks = append(blocks, ContextBlock{
+			Name: "worker_overview（任务全局态势）", Tokens: estimateTokens(overview),
+			Note: "了解大局，可降级/容忍 stale；本意图细节看下方 intent_mandate。",
+		})
+	}
+	blocks = append(blocks, ContextBlock{
+		Name: "intent_mandate（本意图/启动指令/锚定资产）", Tokens: 0,
+		Note: "在 system prompt 中全量在场，绝不压缩；此处不重复。",
+	})
+	if hasConstraints {
+		blocks = append(blocks, ContextBlock{
+			Name: "constraints（操作约束）", Tokens: 0,
+			Note: "在 system prompt 中，执行命令/写文件时严格遵守。",
+		})
+	}
+	factors := ""
+	if digestCount > 0 {
+		factors = fmt.Sprintf("（%d 个 digest 折叠了 %d 条冷节点）", digestCount, covered)
+	}
+	blocks = append(blocks, ContextBlock{
+		Name: "cold_digest（冷区压缩）" + factors, Tokens: 0,
+		Foldable: true, Folded: digestCount > 0,
+		Note: "被折叠的冷事实不在 overview 里逐条出现；需要时 expand_digest(id)/node_detail(id) 取回。",
+	})
+	return renderContextManifest(blocks)
+}
