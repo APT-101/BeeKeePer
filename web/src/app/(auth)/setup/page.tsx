@@ -66,7 +66,7 @@ export default function SetupPage() {
             alt="BEEKEEPER"
             width={160}
             height={160}
-            className="relative brightness-0 invert"
+            className="relative"
           />
         </div>
       </div>
