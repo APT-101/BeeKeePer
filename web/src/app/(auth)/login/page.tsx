@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { APP_CONFIG } from "@/config/app-config";
 import { api } from "@/lib/api";
 import { auth } from "@/lib/auth";
 
@@ -68,8 +69,12 @@ export default function LoginPage() {
           <div className="absolute size-60 rounded-full border border-primary-foreground/15" />
           <div className="absolute size-40 rounded-full border border-primary-foreground/20" />
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/logo.png" alt="BeeKeePer" width={160} height={160} className="relative brightness-0 invert" />
+          <img src="/logo.png" alt="BEEKEEPER" width={160} height={160} className="relative brightness-0 invert" />
         </div>
+        {/* 字符 logo：全大写 + 琥珀金渐变 + 加宽字距（与主侧栏一致） */}
+        <span className="bg-gradient-to-r from-amber-400 via-yellow-300 to-amber-400 bg-clip-text mt-8 text-2xl font-bold tracking-[0.3em] text-transparent">
+          {APP_CONFIG.name}
+        </span>
       </div>
 
       {/* Right panel */}

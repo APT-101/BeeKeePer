@@ -63,7 +63,7 @@ export default function SetupPage() {
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src="/logo.png"
-            alt="BeeKeePer"
+            alt="BEEKEEPER"
             width={160}
             height={160}
             className="relative brightness-0 invert"
