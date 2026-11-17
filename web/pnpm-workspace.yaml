@@ -1,0 +1,5 @@
+# pnpm v11 settings (package.json 的 pnpm 字段已废弃，集中配置迁移至此)。
+# magic-string 1.x 为 ESM-only；@tailwindcss/node@4.x 经 Next 的 CJS require-hook
+# 加载它会报 "require() of ES Module not supported"。固定 0.30.x（带 CJS 出口）绕开。
+overrides:
+  magic-string: 0.30.17
