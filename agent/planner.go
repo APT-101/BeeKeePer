@@ -46,6 +46,9 @@ type Planner struct {
 	// dispatch it step-by-step over rounds instead of front-loading it in parallel.
 	todoMu sync.Mutex
 	todos  map[int64]*actool.TodoStore
+	// todoMeta 平行记录每条 todo 的平台结构字段（satisfied_by_fact_id / depends_on），
+	// 与 todoFor 同生命周期：模型 TodoWrite 写入、syncTodos 落库、MarkTodoSatisfied 匹配。
+	todoMeta map[int64]map[int]TodoMeta
 
 	// M2 状态与记忆：todo 落库（DB 为真值）与跨任务经验注入；nil = 关闭。
 	todoPersist TodoPersist
@@ -53,7 +56,7 @@ type Planner struct {
 }
 
 func NewPlanner(prov llm.Provider, model, workDir string, tx *transcript.Store, window, maxTurns int) *Planner {
-	return &Planner{prov: prov, model: model, workDir: workDir, tx: tx, window: window, maxTurns: maxTurns, todos: map[int64]*actool.TodoStore{}}
+	return &Planner{prov: prov, model: model, workDir: workDir, tx: tx, window: window, maxTurns: maxTurns, todos: map[int64]*actool.TodoStore{}, todoMeta: map[int64]map[int]TodoMeta{}}
 }
 
 func (p *Planner) SetCompactionWindowResolver(fn func() int) { p.windowFn = fn }
@@ -360,6 +363,9 @@ func (p *Planner) Plan(ctx context.Context, taskID int64, as *db.AssetStore, ts 
 	// 领域工具 + 基础默认工具集（Read/Write/Edit/MultiEdit/LS/Glob/Grep/Bash）
 	// 资产覆盖度功能关闭时剔除 add_task_scope/list_untested_assets（不入 prompt）。
 	base := append(tsx.DropCoverageTools(tsx.PlannerTools()), actool.DefaultTools()...)
+	// M2-2 schema 化（§8.11）：平台版 TodoWrite（结构字段 fact/depends），直接绑本任务
+	// 持久 store；agentcore 的 Todos 自动注入不再启用（其 schema 只有 content/status）。
+	base = append(base, p.todoWriteTool(ctx, ts.ID()))
 	ctx = WithRunInfo(ctx, RunInfo{TaskID: taskID, ExplorationID: explorationID(ts)})
 	tools, def, cleanup := AugmentTools(ctx, "planner", base)
 	defer cleanup()
@@ -423,12 +429,9 @@ func (p *Planner) Plan(ctx context.Context, taskID int64, as *db.AssetStore, ts 
 		MaxTurns:              p.maxTurns, // 0 = unlimited (configurable in agent management)
 		MaxDuration:           maxDur,     // 0=不限;有 deadline 时=距 deadline 剩余
 		Compaction:            compactionConfig(p.compactionWindow()),
-		// 跨唤醒共享的规划待办：让串行链在多轮之间保留（session 是新的，store 不是）。
-		// M2-1：todoPersist 装配后首次唤醒从 DB 恢复。
-		Todos: p.todoFor(ctx, ts.ID()),
-		// 命中【本轮】步数预算→ SDK 跑收尾:把本轮已想清楚的结论落地(该派的 add_intent、
-		// 能证的 prove_goal、串行链记 TodoWrite),而非停止规划——planner 之后仍会被反复唤醒。
-		// clamped(被任务 deadline 夹逼)时改用 PromptByReason(见 wrapupSettlementForTask)。
+		// 跨唤醒共享的规划待办改由【平台版 TodoWrite 工具】绑定的持久 store 承载
+		// （见 Plan 内工具装配，§8.11）；此处不再传 agentcore Todos（避免重复注入
+		// 无结构字段的内置 TodoWrite）。
 		Settlement:   settle,
 		NonStreaming: p.nonStreaming(), // 该 profile 选非流式时走 Provider.Complete
 		MaxTokens:    p.maxTokens(),    // 0 = 不发上限,由服务端默认值决定
@@ -454,12 +457,14 @@ func (p *Planner) Plan(ctx context.Context, taskID int64, as *db.AssetStore, ts 
 		}
 	}
 	input := lead + situational + "\n\n据上面的态势，判定目标。目标已【真正达成】（已拿到目标成果/已确认目标漏洞）时用 prove_goal 逐个标记。**硬底线：只要目标尚未达成、且当前没有任何 open 或 running 意图（frontier_open=0 且 running_intents 为空），本轮就必须产出至少一个向目标推进的意图——此时没有在跑的 work 可等、也没有在排队的方向，产出 0 意图=任务停摆。仅当已有 open/running 意图在推进、或目标已达成时，本轮才可以不产出新意图。**"
-	if len(opts.Todos.List()) > 0 {
-		input += renderPlannerTodos(opts.Todos.List())
+	// 跨唤醒待办来自平台版 TodoWrite 绑定的持久 store（§8.11；opts.Todos 已弃用）。
+	todoItems := p.todoFor(ctx, ts.ID()).List()
+	if len(todoItems) > 0 {
+		input += renderPlannerTodos(todoItems)
 	}
 	// M2-4 上下文构成清单（决策可解释性）：本轮喂了哪些块 + token 估算 +
 	// cold-digest 折叠情况（折叠≠丢失，expand_digest 可取回）。
-	todoText := renderPlannerTodos(opts.Todos.List())
+	todoText := renderPlannerTodos(todoItems)
 	digestCount, covered := 0, 0
 	if ds, _ := tsx.coldDigestOverview(); ds != nil {
 		digestCount = len(ds)

@@ -19,23 +19,38 @@ import (
 // pgTodoPersist implements agent.TodoPersist over db.todo_items.
 type pgTodoPersist struct{ d *db.DB }
 
-func (p *pgTodoPersist) LoadTodos(ctx context.Context, expID int64) ([]actool.Todo, error) {
+func (p *pgTodoPersist) LoadTodos(ctx context.Context, expID int64) ([]agent.PersistedTodo, error) {
 	rows, err := p.d.LoadTodos(ctx, expID)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]actool.Todo, 0, len(rows))
+	out := make([]agent.PersistedTodo, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, actool.Todo{Content: r.Title, Status: actool.TodoStatus(r.Status)})
+		meta := agent.TodoMeta{}
+		if r.FactID.Valid {
+			meta.FactID = r.FactID.Int64
+		}
+		if len(r.Depends) > 0 {
+			meta.Depends = r.Depends
+		}
+		out = append(out, agent.PersistedTodo{
+			Todo: actool.Todo{Content: r.Title, Status: actool.TodoStatus(r.Status)},
+			Meta: meta,
+		})
 	}
 	return out, nil
 }
 
-func (p *pgTodoPersist) SaveTodos(ctx context.Context, expID int64, items []actool.Todo) error {
+func (p *pgTodoPersist) SaveTodos(ctx context.Context, expID int64, items []agent.PersistedTodo) error {
 	rows := make([]db.TodoItem, 0, len(items))
 	for i, it := range items {
+		fact := sql.NullInt64{}
+		if it.Meta.FactID > 0 {
+			fact = sql.NullInt64{Int64: it.Meta.FactID, Valid: true}
+		}
 		rows = append(rows, db.TodoItem{
-			Seq: i + 1, Title: it.Content, Status: string(it.Status),
+			Seq: i + 1, Title: it.Todo.Content, Status: string(it.Todo.Status),
+			FactID: fact, Depends: it.Meta.Depends,
 		})
 	}
 	return p.d.ReplaceTodos(ctx, expID, rows)
