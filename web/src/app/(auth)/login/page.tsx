@@ -67,8 +67,11 @@ export default function LoginPage() {
           <div className="absolute size-80 rounded-full border border-primary-foreground/10" />
           <div className="absolute size-60 rounded-full border border-primary-foreground/15" />
           <div className="absolute size-40 rounded-full border border-primary-foreground/20" />
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/logo.png" alt="BEEKEEPER" width={160} height={160} className="relative" />
+          {/* 白底圆卡承载徽章：深色面板上保证深蓝徽章轮廓清晰 */}
+          <div className="relative flex size-40 items-center justify-center rounded-full bg-white shadow-lg">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/logo.png" alt="BEEKEEPER" width={128} height={128} className="h-[76%] w-[76%] object-contain" />
+          </div>
         </div>
       </div>
 

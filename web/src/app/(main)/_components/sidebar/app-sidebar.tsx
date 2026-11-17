@@ -44,7 +44,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
             <SidebarMenuButton asChild>
               <Link prefetch={false} href="/function/tasks">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src="/logo.png" alt="BEEKEEPER" width={40} height={40} className="shrink-0" />
+                <img src="/logo.png" alt="BEEKEEPER" width={40} height={40} className="shrink-0 rounded-full bg-white/90 p-1.5" />
                 {/* 字符 logo：全大写 + 琥珀金渐变 + 加宽字距（养蜂人主题色） */}
                 <span className="bg-gradient-to-r from-amber-500 via-yellow-400 to-amber-500 bg-clip-text text-base font-bold tracking-[0.18em] text-transparent">
                   {APP_CONFIG.name}
