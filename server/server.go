@@ -1111,14 +1111,14 @@ func (s *Server) auditConfig(action, resourceType, resourceID string, before, af
 	}
 	s.bus.Publish(context.Background(), events.Event{
 		Kind:    events.EvConfigChanged,
-		Payload: ConfigChangedPayload{Actor: "ARTEX", Action: action, ResourceType: resourceType, ResourceID: resourceID, Before: before, After: after},
+		Payload: ConfigChangedPayload{Actor: "BeeKeePer", Action: action, ResourceType: resourceType, ResourceID: resourceID, Before: before, After: after},
 	})
 }
 
 // --- handlers ---
 
 func (s *Server) health(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, 200, map[string]any{"ok": true, "service": "artex", "version": BuildVersion})
+	writeJSON(w, 200, map[string]any{"ok": true, "service": "beekeeper", "version": BuildVersion})
 }
 
 func (s *Server) stats(w http.ResponseWriter, r *http.Request) {
