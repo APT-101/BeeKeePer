@@ -1224,6 +1224,8 @@ func (e *Engine) runIntent(ctx context.Context, t *Task, name string, worker *ag
 		}
 	}
 	log.Printf("[worker %s] task %s 意图 #%d 结束: %s (写回 %s)", name, t.ID, intent.ID, state, wrote)
+	// M2-3 自动闭环：blocked/exhausted 意图结束后自动沉淀跨任务经验（限流去重，旁路）。
+	e.autoSinkLesson(ctx, t, intent, state, err, reason)
 	e.touch(t.ID)
 	t.NotifyDone(intent.ID) // results changed the graph -> wake the planner (with the just-finished intent id)
 	return true

@@ -127,6 +127,18 @@ type LessonNote struct {
 	CreatedAt      time.Time
 }
 
+// LessonCountSince 统计某源 (task,intent) 在 since 内同 kind 的 lesson 条数——
+// worker 撞墙自动沉淀（§8.8）的去重限流：同源短时间重复撞墙不重复写经验。
+func (d *DB) LessonCountSince(ctx context.Context, kind string, taskID, intentID int64, since time.Duration) (int, error) {
+	var n int
+	err := d.QueryRowContext(ctx, `
+SELECT count(*) FROM lesson_notes
+WHERE kind=$1 AND source_task_id=$2 AND source_intent_id=$3
+  AND created_at > now() - make_interval(secs => $4)`,
+		kind, nullInt64(taskID), nullInt64(intentID), int64(since.Seconds())).Scan(&n)
+	return n, err
+}
+
 // AddLesson records one lesson. detail must be JSON-serializable.
 func (d *DB) AddLesson(ctx context.Context, l *LessonNote) (int64, error) {
 	detailJSON := []byte("{}")
