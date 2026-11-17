@@ -115,6 +115,25 @@ FROM todo_items WHERE exploration_id=$1 ORDER BY seq`, expID)
 	return out, rows.Err()
 }
 
+// MarkTodoSatisfied 自动推进 M2 todo 依赖闭环（docs §8.10）：某 fact 节点落图后，
+// 把本 exploration 内 satisfied_by_fact_id 指向该 fact、且尚未完成（pending/
+// in_progress）的 todo 确定性标记为 completed——"意图产出 → 子目标达成"不再依赖
+// 模型自觉，而是由系统在 fact 写入侧补丁（纯旁路，调用失败不阻断 fact 写入）。
+// 返回被升级的 todo 行数。
+func (s *ExplorationStore) MarkTodoSatisfied(ctx context.Context, factID int64) (int64, error) {
+	res, err := s.db.ExecContext(ctx, `
+UPDATE todo_items
+SET status = 'completed',
+    note = COALESCE(note, '') || '[auto] satisfied by fact #' || $2::text
+WHERE exploration_id = $1 AND satisfied_by_fact_id = $2
+  AND status IN ('pending', 'in_progress')`, s.expID, factID)
+	if err != nil {
+		return 0, fmt.Errorf("todo auto-satisfy: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	return n, nil
+}
+
 // LessonNote is one cross-task lesson (schema §M2-3).
 type LessonNote struct {
 	ID             int64

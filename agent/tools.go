@@ -1499,6 +1499,9 @@ func (t *ToolSet) recordOneFact(it factItem, defaultIntent int64) (int64, error)
 		_ = t.ts.Link(intent, db.RelYields, id) // chain: intent -> fact
 	}
 	t.writes.Facts++
+	// M2 依赖闭环自动判定（§8.10）：fact 已落图 → satisfied_by_fact_id 匹配的 todo
+	// 由系统标 completed（确定性推进；纯旁路，失败不影响 fact 写入）。
+	_, _ = t.ts.MarkTodoSatisfied(context.Background(), id)
 	return id, nil
 }
 
