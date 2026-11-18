@@ -7,6 +7,7 @@ import {
   FolderOpen,
   FolderSync,
   LayoutDashboard,
+  LayoutTemplate,
   type LucideIcon,
   MessageSquare,
   Network,
@@ -64,6 +65,7 @@ export const sidebarItems: NavGroup[] = [
     id: 1,
     label: "功能",
     items: [
+      { id: "overview", title: "扩展能力总览", url: "/function/overview", icon: LayoutTemplate, badge: "new" },
       { id: "dashboard", title: "仪表盘", url: "/dashboard", icon: LayoutDashboard },
       { id: "chat", title: "对话", url: "/chat", icon: MessageSquare },
       { id: "tasks", title: "任务", url: "/function/tasks", icon: Target },
