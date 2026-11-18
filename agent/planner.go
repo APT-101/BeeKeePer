@@ -120,20 +120,51 @@ func (p *Planner) SetKillWork(fn func(intentID int64) error) { p.killWork = fn }
 // steer_work tool can inject a mid-run course-correction into a running worker.
 func (p *Planner) SetSteerWork(fn func(intentID int64, msg string) error) { p.steerWork = fn }
 
+// plannerTodoSnapshot returns the persistent todo list merged with the platform
+// structured fields (satisfied_by_fact_id / depends_on) for prompt rendering.
+func (p *Planner) plannerTodoSnapshot(ctx context.Context, expID int64) []PersistedTodo {
+	list := p.todoFor(ctx, expID).List()
+	p.todoMu.Lock()
+	meta := p.todoMeta[expID]
+	p.todoMu.Unlock()
+	out := make([]PersistedTodo, 0, len(list))
+	for i, it := range list {
+		m := TodoMeta{}
+		if meta != nil {
+			m = meta[i]
+		}
+		out = append(out, PersistedTodo{Todo: it, Meta: m})
+	}
+	return out
+}
+
 // renderPlannerTodos formats the persistent planning todo for injection into the
-// wake-up prompt (empty when there are no todos yet — first wake-up).
-func renderPlannerTodos(items []actool.Todo) string {
+// wake-up prompt (empty when there are no todos yet — first wake-up). Meta
+// annotations make the fact/dependency closure visible to the model: a todo it
+// pinned to fact #N keeps showing [fact #N] until the system auto-marks it.
+func renderPlannerTodos(items []PersistedTodo) string {
 	if len(items) == 0 {
 		return ""
 	}
 	var b strings.Builder
 	b.WriteString("\n\n【你的规划待办（跨唤醒保留，上一轮你写的）】：\n")
 	for _, it := range items {
-		mark := map[actool.TodoStatus]string{actool.TodoPending: "☐", actool.TodoInProgress: "▶", actool.TodoCompleted: "✔"}[it.Status]
+		mark := map[actool.TodoStatus]string{actool.TodoPending: "☐", actool.TodoInProgress: "▶", actool.TodoCompleted: "✔"}[it.Todo.Status]
 		if mark == "" {
 			mark = "☐"
 		}
-		b.WriteString(fmt.Sprintf("  %s %s\n", mark, it.Content))
+		tag := ""
+		if it.Meta.FactID > 0 {
+			tag = fmt.Sprintf(" [fact #%d]", it.Meta.FactID)
+		}
+		if len(it.Meta.Depends) > 0 {
+			deps := make([]string, 0, len(it.Meta.Depends))
+			for _, d := range it.Meta.Depends {
+				deps = append(deps, fmt.Sprintf("#%d", d))
+			}
+			tag += " 依赖 " + strings.Join(deps, ",")
+		}
+		b.WriteString(fmt.Sprintf("  %s %s%s\n", mark, it.Todo.Content, tag))
 	}
 	b.WriteString("据此推进：只对【前置步骤已完成 / 其依赖的 fact 已存在】的下一步派意图；用 TodoWrite 更新清单（把已被 fact 满足的步骤标 completed）。不要重复派已在清单里 pending/in_progress 的步骤。")
 	return b.String()
@@ -458,7 +489,8 @@ func (p *Planner) Plan(ctx context.Context, taskID int64, as *db.AssetStore, ts 
 	}
 	input := lead + situational + "\n\n据上面的态势，判定目标。目标已【真正达成】（已拿到目标成果/已确认目标漏洞）时用 prove_goal 逐个标记。**硬底线：只要目标尚未达成、且当前没有任何 open 或 running 意图（frontier_open=0 且 running_intents 为空），本轮就必须产出至少一个向目标推进的意图——此时没有在跑的 work 可等、也没有在排队的方向，产出 0 意图=任务停摆。仅当已有 open/running 意图在推进、或目标已达成时，本轮才可以不产出新意图。**"
 	// 跨唤醒待办来自平台版 TodoWrite 绑定的持久 store（§8.11；opts.Todos 已弃用）。
-	todoItems := p.todoFor(ctx, ts.ID()).List()
+	// 快照带结构字段（fact/依赖标注），让模型看到自己钉的引用。
+	todoItems := p.plannerTodoSnapshot(ctx, ts.ID())
 	if len(todoItems) > 0 {
 		input += renderPlannerTodos(todoItems)
 	}

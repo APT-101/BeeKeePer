@@ -181,6 +181,27 @@ function toolInputText(tool: string, raw: string): string {
   return raw;
 }
 
+// prettyToolResult formats a tool output that carries a JSON body with
+// indentation (structured results like get_worker_output render readable);
+// non-JSON falls back to the raw text. A few tools prepend a label ("TodoWrite "
+// / "-- TodoWrite\n" / "fact recorded: N"), so the JSON body is located by its
+// first "{" and only the body is pretty-printed.
+function prettyToolResult(raw: string | null, fallback: string): string {
+  if (!raw) return fallback;
+  const start = raw.indexOf("{");
+  try {
+    if (start > 0) {
+      const prefix = raw.slice(0, start);
+      if (prefix.trim() !== "") {
+        return prefix + JSON.stringify(JSON.parse(raw.slice(start)), null, 2);
+      }
+    }
+    return JSON.stringify(JSON.parse(raw.startsWith("{") ? raw : raw.slice(start)), null, 2);
+  } catch {
+    return raw;
+  }
+}
+
 // InterceptCard renders an inline intercept_request approval card. The pending_id
 // is extracted from the summary (format: "工具 X 请求审批 (#N)") so buttons are
 // available immediately without waiting for the detail load.
@@ -472,7 +493,7 @@ function ToolBlock({
       </button>
       {open && (
         <pre className="ml-7 mb-1 max-h-72 overflow-auto whitespace-pre-wrap break-all rounded bg-muted/50 p-2 font-mono text-[11px] leading-relaxed">
-          {detail ?? "加载中…"}
+          {prettyToolResult(detail, "加载中…")}
         </pre>
       )}
     </section>

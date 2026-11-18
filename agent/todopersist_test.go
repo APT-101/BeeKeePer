@@ -136,6 +136,23 @@ func TestSyncTodosNoPersistNoop(t *testing.T) {
 	p.syncTodos(t.Context(), 1) // nil persist: must not panic
 }
 
+func TestRenderPlannerTodosMeta(t *testing.T) {
+	items := []PersistedTodo{
+		{Todo: actool.Todo{Content: "探测端口", Status: actool.TodoPending}},
+		{Todo: actool.Todo{Content: "验证 SQLi", Status: actool.TodoPending}, Meta: TodoMeta{FactID: 1234, Depends: []int64{1}}},
+		{Todo: actool.Todo{Content: "确认 CMS 版本", Status: actool.TodoCompleted}, Meta: TodoMeta{FactID: 5678}},
+	}
+	out := renderPlannerTodos(items)
+	for _, want := range []string{"探测端口", "验证 SQLi [fact #1234] 依赖 #1", "确认 CMS 版本 [fact #5678]", "✔"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("renderPlannerTodos missing %q:\n%s", want, out)
+		}
+	}
+	if got := renderPlannerTodos(nil); got != "" {
+		t.Errorf("empty must render empty, got %q", got)
+	}
+}
+
 func TestRenderLessons(t *testing.T) {
 	out := renderLessons(nil)
 	if out != "" {

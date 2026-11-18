@@ -32,9 +32,18 @@ func (s *Server) decisions(w http.ResponseWriter, r *http.Request) {
 	if s.m.pg != nil {
 		if rows, terr := s.m.pg.LoadTodos(r.Context(), t.ExpID); terr == nil {
 			for _, it := range rows {
+				var factID any
+				if it.FactID.Valid {
+					factID = it.FactID.Int64
+				}
+				depends := []int64{}
+				if len(it.Depends) > 0 {
+					depends = it.Depends
+				}
 				todos = append(todos, map[string]any{
 					"seq": it.Seq, "title": it.Title, "status": it.Status,
 					"blocked_reason": it.Blocked, "note": it.Note,
+					"fact_id": factID, "depends": depends,
 				})
 			}
 		}
