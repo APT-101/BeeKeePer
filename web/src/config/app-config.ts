@@ -4,8 +4,8 @@ const currentYear = new Date().getFullYear();
 
 export const APP_CONFIG = {
   name: "BEEKEEPER",
-  // 侧栏左上角字符 logo 的显示用短名（9 字符过长收缩；全名仍用于 title 等处）。
-  shortName: "K2EPER",
+  // 侧栏左上角字符 logo 的显示用短名（用户钦定；全名仍用于 title 等处）。
+  shortName: "BEEGUARD",
   version: packageJson.version,
   copyright: `© ${currentYear}, BeeKeePer.`,
   meta: {

@@ -41,7 +41,7 @@ export default function LoginPage() {
     setLoading(true);
     setError("");
     try {
-      const { token } = await api.login("BeeKeePer", password);
+      const { token } = await api.login("beeguard", password);
       auth.setToken(token);
       window.location.replace("/function/tasks");
     } catch {
@@ -67,11 +67,9 @@ export default function LoginPage() {
           <div className="absolute size-80 rounded-full border border-primary-foreground/10" />
           <div className="absolute size-60 rounded-full border border-primary-foreground/15" />
           <div className="absolute size-40 rounded-full border border-primary-foreground/20" />
-          {/* 白底圆卡承载徽章：深色面板上保证深蓝徽章轮廓清晰 */}
-          <div className="relative flex size-40 items-center justify-center rounded-full bg-white shadow-lg">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/logo.png" alt="BEEKEEPER" width={128} height={128} className="h-[88%] w-[88%] object-contain" />
-          </div>
+          {/* 金色圆形 logo 直接置于深色面板（无白卡）——与深底预览一致 */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/logo.png" alt="BEEKEEPER" width={160} height={160} className="relative size-40 object-contain" />
         </div>
       </div>
 
@@ -85,7 +83,7 @@ export default function LoginPage() {
           <form onSubmit={handleSubmit} className="flex flex-col gap-4">
             <div className="space-y-1.5">
               <Label htmlFor="username">用户名</Label>
-              <Input id="username" value="BeeKeePer" readOnly className="bg-muted text-muted-foreground" />
+              <Input id="username" value="beeguard" readOnly className="bg-muted text-muted-foreground" />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="password">密码</Label>
