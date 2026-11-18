@@ -635,6 +635,26 @@ export interface Activity {
   cache_write_tokens?: number;
 }
 
+// M3 决策卡 todo 快照行（/api/exploration/decisions；db 为准）。fact_id 为
+// satisfied_by_fact_id（模型 TodoWrite 显式声明 + 系统 auto-satisfy 的匹配键）；
+// depends 为前置 todo 序号引用。
+export interface ExplorationTodoRow {
+  seq: number;
+  title: string;
+  status: string;
+  blocked_reason?: string | null;
+  note?: string | null;
+  fact_id?: number | null;
+  depends?: number[];
+}
+
+export interface ExplorationDecisions {
+  task_id: string;
+  intents: unknown[];
+  goals: unknown[];
+  todos: ExplorationTodoRow[];
+}
+
 export interface LLMAuditProfile {
   id: number;
   name: string;

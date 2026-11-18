@@ -30,6 +30,7 @@ import type {
   DeleteTaskResult,
   Edge,
   EvidenceBodyPreview,
+  ExplorationDecisions,
   Finding,
   FindingAssetTree,
   FindingDeepenResponse,
@@ -658,6 +659,10 @@ export const api = {
     }));
   },
   activityDetail: (id: number, task?: string) => get<{ detail: string }>(`/exploration/activity/${id}${tq(task)}`),
+  // M3 决策卡：任务 planner 的意图清单 + 目标判定 + todo 快照（db 为准——
+  // 含系统 auto-satisfy 的 completed 状态与 fact 绑定，见 §8.10/§8.11）。
+  explorationDecisions: (task: string) =>
+    get<ExplorationDecisions>(`/exploration/decisions?task=${encodeURIComponent(task)}`),
   // Reverse-paginated session history. session = "main" | "plan" | "intent:<id>".
   // before=0 → latest page; before=<id> → the older page ending before that id.
   // snapshotCursor is the TASK-level max id at query time — open the task SSE at

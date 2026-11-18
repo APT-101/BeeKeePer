@@ -2052,6 +2052,7 @@ export function SessionsTab({ taskId }: { taskId: string }) {
             ) : (
               <div className="flex items-center border-t px-4 py-2">
                 <TodoPopover
+                  taskId={taskId}
                   seq={latestTodoSeq}
                   fetchDetail={(seq) => api.activityDetail(seq, taskId).then((r) => r.detail ?? "")}
                 />
