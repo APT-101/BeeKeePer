@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -94,6 +95,15 @@ func (s *Server) runSandboxedBash(ctx context.Context, input json.RawMessage, tc
 		return actool.Errorf("Bash(沙箱) 仅限任务运行上下文中使用"), nil
 	}
 	taskID := strconv.FormatInt(ri.TaskID, 10)
+	// L4 变化感知刷新：先把任务当前 scope 重编译进 task_egress（scope 变化才
+	// 写库 + 拆缓存容器）——模型 add_task_scope 登记的授权边界，对下一条 Bash
+	// 即生效（否则白名单停留在任务启动时的编译结果，空 scope 任务 fail-closed
+	// 且模型登记永不生效——293 轮次真机复现的根因）。
+	if ri.TaskID > 0 {
+		if rerr := s.m.refreshTaskEgress(ctx, ri.TaskID); rerr != nil {
+			log.Printf("[egress] task %s bash 前 scope 重编译失败: %v", taskID, rerr)
+		}
+	}
 	spec := sandbox.Spec{
 		Workspace: filepath.Join(s.m.dir, "tasks", taskID),
 		SkillsDir: s.skillDir,

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"slices"
 	"strconv"
 
 	"github.com/Autumn-27/artex/agent"
@@ -111,6 +112,13 @@ func (m *Manager) refreshTaskEgress(ctx context.Context, taskID int64) error {
 	if len(compiled.Rules) > 0 {
 		rule = compiled.Rules[0]
 	}
+	// 变化感知：与 task_egress 现有编译结果相同 → 无事可做（不写库、不拆容器）。
+	// 幂等高频调用（Bash 前每次 refresh）因此零开销；scope 变化才重编译 + 拆除
+	// 已缓存容器（63d9014 的 L4 重建语义），保证"模型 add_task_scope 后下一条
+	// Bash 即用新白名单重建"。
+	if e, eerr := m.pg.GetTaskEgress(taskID); eerr == nil && e != nil && egressSame(e, rule) {
+		return nil
+	}
 	if err := m.pg.UpsertTaskEgress(&db.TaskEgress{
 		TaskID: taskID, CompiledFrom: "scope", DenyDefault: true, Version: compiled.Version,
 		AllowDomains: rule.Domains, AllowIPs: rule.IPs, AllowCIDRs: rule.CIDRs, AllowPorts: uint16ToInts(rule.Ports),
@@ -121,6 +129,20 @@ func (m *Manager) refreshTaskEgress(ctx context.Context, taskID int64) error {
 	// （幂等；未建容器的任务无操作）。
 	m.CloseTaskSandbox(context.Background(), strconv.FormatInt(taskID, 10))
 	return nil
+}
+
+// egressSame reports whether the persisted task_egress row equals what a fresh
+// compile of the given rule would write (DenyDefault fixed true; four allow
+// lists compared in order — roe.Compile emits deterministic order for the same
+// scope, so a recompile of an unchanged scope lands identical).
+func egressSame(e *db.TaskEgress, rule roe.EgressRule) bool {
+	if e == nil || !e.DenyDefault {
+		return false
+	}
+	return slices.Equal(e.AllowDomains, rule.Domains) &&
+		slices.Equal(e.AllowIPs, rule.IPs) &&
+		slices.Equal(e.AllowCIDRs, rule.CIDRs) &&
+		slices.Equal(e.AllowPorts, uint16ToInts(rule.Ports))
 }
 
 // intsToUint16 converts a port slice for roe matching.
