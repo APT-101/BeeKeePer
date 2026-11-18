@@ -70,7 +70,7 @@ export default function LoginPage() {
           {/* 白底圆卡承载徽章：深色面板上保证深蓝徽章轮廓清晰 */}
           <div className="relative flex size-40 items-center justify-center rounded-full bg-white shadow-lg">
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/logo.png" alt="BEEKEEPER" width={128} height={128} className="h-[76%] w-[76%] object-contain" />
+            <img src="/logo.png" alt="BEEKEEPER" width={128} height={128} className="h-[88%] w-[88%] object-contain" />
           </div>
         </div>
       </div>
