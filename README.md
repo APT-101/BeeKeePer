@@ -4,6 +4,8 @@
 
 AI 自主渗透测试系统（Go 后端 + Next.js 前端）
 
+> **v1.0.1** · 本轮功能增加与优化：多资产类型（移动端 / 二进制 / 固件 / 代码审计 / AI 原生应用）扩展规划，详见下方「2.0 扩展规划」。
+
 
 🌐 **在线 Demo**： [https://artex-demo.vercel.app/](https://artex-demo.vercel.app/)
 
@@ -271,6 +273,54 @@ CGO_ENABLED=0 go build -tags embedui -o artex ./cmd/artex
 - 前端：`cd web && npm run dev`（`/api` 反代到后端，带热更新）
 - 测试：`go test ./...`
 - Mock 预览（无后端）：`cd web && NEXT_PUBLIC_MOCK=1 npm run dev`
+
+---
+
+## 2.0 扩展规划（v1.0.1 起）
+
+> 当前系统聚焦 Web 站点资产的漏洞挖掘与渗透测试。v1.0.1 版本号起，规划扩展为多资产类型平台：在**不改动核心引擎（planner/worker/探索图/决策卡/finding/报告）**的前提下，通过「资产类型扩展 + 类型化沙箱 + 执行通道」三个增量挂点承载新形态资产。
+
+### 执行环境
+
+```
+BEEKEEPER 服务端（Linux 容器沙箱）
+  ├─ Web / 代码审计 / 固件静态         ← 现有容器链路（fail-closed）
+  │
+[执行通道：控制面在服务端，动作面在 Windows 主机]
+  ├─ PC 程序       本机安装路径 → DSH 主机本机评估
+  ├─ Android       本地模拟器 + adb 连接方式 → DSH 主机桥接操作
+  ├─ 固件动态      （需 ARM 主机，未排期）
+  └─ iOS           （未涉及）
+```
+
+### 能力矩阵（首期 / 进阶）
+
+| 资产类型 | 首期能力 | 进阶（未排期） |
+|---|---|---|
+| Web | ✅ 现有容器沙箱全链路 | — |
+| **PC 程序** | DSH 主机本机评估：进程/文件/注册表/服务/网络行为/畸形输入（只读红线） | — |
+| **Android** | 模拟器 + adb：安装/启动/遍历/dumpsys/logcat/抓包 | frida hook、脱壳 |
+| **iOS** | 未涉及 | 未涉及 |
+| **固件** | binwalk 解包 / 密钥与配置提取（静态） | 需 ARM 主机动态运行 |
+| **代码审计** | git + SAST/SCA/Secret + code_verify 静态动态闭环 | — |
+| **AI 原生应用** | 集成 [Tencent AI-Infra-Guard](https://github.com/Tencent/AI-Infra-Guard)（外挂引擎）：Agent/Skills/MCP/Infra Scan + LLM Jailbreak Eval | — |
+
+### 里程碑
+
+| 阶段 | 内容 |
+|---|---|
+| **P0** | 代码审计：code_repo 资产 + container-code 沙箱 + code_scan_* 工具 + 静态动态闭环 |
+| **P1** | 资产模型扩展（mobile_app / binary / code_repo / ai_app）+ 任务类型分流 + 前端页面架构 |
+| **P2** | 二进制（desktop_app + firmware 静态）执行链 |
+| **P3** | 移动端（Android 模拟器 + adb）执行通道 |
+| **P4** | AI 原生应用（AI-Infra-Guard 外挂集成） |
+| **P5** | 收束：各类型端到端真机验证 + 文档 |
+
+### 红线（全程）
+
+- **禁止删除任何数据**（服务端容器 / DSH 主机执行均只读红线）
+- **fail-closed**：执行通道不可达 / 镜像缺失 → 任务拒绝，绝不静默降级
+- **凭证保险库审计**：新类型涉及的密钥/凭据全部走加密入库 + 取用审计
 
 ---
 
