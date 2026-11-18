@@ -61,6 +61,7 @@ jobs:
           ARTEX_PACKAGE: "1"
           ARTEX_PACKAGE_DIR: dist
         run: |
+          chmod +x ./build.sh
           ./build.sh --target "${ARTEX_TARGET_OS}/${ARTEX_TARGET_ARCH}"
       - name: Smoke test Linux amd64 binary
         if: matrix.goos == 'linux' && matrix.goarch == 'amd64'
