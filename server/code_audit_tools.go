@@ -147,11 +147,11 @@ func (s *Server) codeClone() actool.CoreTool {
 	return wrTool(
 		"code_clone",
 		"把代码仓库克隆/解包进沙箱内 /tmp/repo_<task>（首次调用建立；重复调用复用）。"+
-			"输入 git 仓库地址（https/ssh）或工作空间内已上传压缩包的相对路径（如 uploads/app.zip，自动解包）。"+
+			"输入 git 仓库地址（https/ssh）或任务上传的压缩包（填 uploads/文件名.zip；解包）。"+
 			"clone 目标域名必须已在任务 scope（add_task_scope）登记，否则网络层 fail-closed 拒绝。"+
 			"返回：克隆路径 + 顶层文件清单（前 50 项）。",
 		objSchema(map[string]any{
-			"repo_url": strParam("git 仓库地址（https://... 或 git@...）或工作空间压缩包相对路径（uploads/xxx.zip）"),
+			"repo_url": strParam("git 仓库地址（https://... 或 git@...）或任务上传的压缩包（填 uploads/xxx.zip）"),
 			"branch":   strParam("（可选）分支，默认 default"),
 			"token":    strParam("（可选）私有仓库访问令牌；不传则匿名 clone"),
 		}, "repo_url"),
@@ -173,15 +173,24 @@ func (s *Server) codeClone() actool.CoreTool {
 			}
 			dir := repoDir(ri.TaskID)
 			var cmd string
-			if strings.HasSuffix(strings.ToLower(p.RepoURL), ".zip") || strings.Contains(p.RepoURL, "uploads/") {
-				// 压缩包：在工作空间里定位并解包到沙箱。工作空间只读挂载 /workspace。
+			if strings.HasSuffix(strings.ToLower(p.RepoURL), ".zip") {
+				// 压缩包：任务上传的 zip 在工作空间 tasks/<id>/uploads/，沙箱内只读
+				// 挂载为 /workspace/uploads/<name>。容忍两种写法：
+				//   - 绝对/相对：uploads/xxx.zip 或 xxx.zip（相对 /workspace/uploads）
+				//   - 描述里被前端自动追的绝对路径（.../tasks/<id>/uploads/xxx.zip）→ 只取文件名
+				rel := p.RepoURL
+				if strings.Contains(rel, "/uploads/") {
+					rel = rel[strings.LastIndex(rel, "/uploads/")+len("/uploads/"):]
+				} else if !strings.Contains(rel, "/") {
+					rel = "uploads/" + rel
+				}
 				cmd = fmt.Sprintf(
 					"mkdir -p %s && rm -rf %s/* && "+
-						"SRC=/workspace/%s && test -f \"$SRC\" || { echo '找不到文件: $SRC'; exit 2; } && "+
-						"unzip -q -o \"$SRC\" -d %s/zip && "+
+						"SRC=/workspace/%s && test -f \"$SRC\" || { echo '找不到文件: $SRC（zip 需先上传到任务/uploads）'; exit 2; } && "+
+						"(unzip -q -o \"$SRC\" -d %s/zip || tar -xf \"$SRC\" -C %s/zip 2>/dev/null) && "+
 						"cd %s && (ls %s/zip 2>/dev/null | grep -q . && mv %s/zip/* . || true) && "+
 						"echo 'unpacked from zip' && ls -la | head -50",
-					dir, dir, escapeShPath(p.RepoURL), dir, dir, dir, dir)
+					dir, dir, escapeShPath(rel), dir, dir, dir, dir, dir)
 			} else {
 				url := p.RepoURL
 				branch := ""
