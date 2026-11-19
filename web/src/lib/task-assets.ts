@@ -7,6 +7,7 @@ const ASSET_TYPE_LABELS: Record<NewAssetType, string> = {
   root_domain: "根域名",
   service: "服务",
   subdomain: "子域名",
+  code_repo: "代码仓库",
 };
 
 const TASK_ASSET_SOURCE_LABELS: Record<string, string> = {

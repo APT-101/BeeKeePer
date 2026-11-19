@@ -5,6 +5,7 @@ import type { Graph as G6Graph } from "@antv/g6";
 import {
   AppWindow,
   Building2,
+  GitBranch,
   Globe,
   Link2,
   type LucideIcon,
@@ -44,6 +45,7 @@ const kindMeta: Record<Kind, KindMeta> = {
   service: { label: "服务", icon: Radio, iconBg: "bg-amber-500", hex: "#f59e0b", size: 26 },
   app: { label: "App", icon: AppWindow, iconBg: "bg-fuchsia-500", hex: "#d946ef", size: 26 },
   endpoint: { label: "端点", icon: Link2, iconBg: "bg-rose-500", hex: "#f43f5e", size: 20 },
+  code_repo: { label: "代码仓库", icon: GitBranch, iconBg: "bg-teal-600", hex: "#0d9488", size: 26 },
 };
 
 // G6 节点图标用平台一致的 lucide 图标：把 lucide 的 SVG 路径（v1.22）渲染成白色描边的
@@ -78,6 +80,9 @@ const KIND_ICON: Record<Kind, string> = {
   ),
   endpoint: svgUri(
     '<path d="M9 17H7A5 5 0 0 1 7 7h2"/><path d="M15 7h2a5 5 0 1 1 0 10h-2"/><line x1="8" x2="16" y1="12" y2="12"/>',
+  ),
+  code_repo: svgUri(
+    '<path d="M6 3v12"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/>',
   ),
 };
 

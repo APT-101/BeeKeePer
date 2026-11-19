@@ -214,7 +214,7 @@ export interface TaskAssetView {
 }
 
 // ---- New unified asset model (new backend) ----
-export type NewAssetType = "root_domain" | "ip" | "subdomain" | "app" | "service" | "endpoint";
+export type NewAssetType = "root_domain" | "ip" | "subdomain" | "app" | "service" | "endpoint" | "code_repo";
 
 export interface Asset {
   id: number;
@@ -285,7 +285,7 @@ export interface TaskAssetScopeMutation {
 // 无资产行的根域名="r:<domain>"。in_scope=false 的是仅用于连线的灰色上下文节点。
 export interface CoverageGraphNode {
   key: string;
-  kind: "company" | "root_domain" | "subdomain" | "ip" | "service" | "app" | "endpoint";
+  kind: "company" | "root_domain" | "subdomain" | "ip" | "service" | "app" | "endpoint" | "code_repo";
   label: string;
   tested: boolean;
   in_scope: boolean;

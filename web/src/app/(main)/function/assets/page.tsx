@@ -6,6 +6,7 @@ import {
   BuildingIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
+  GitBranchIcon,
   GlobeIcon,
   KeyRoundIcon,
   LayoutTemplateIcon,
@@ -105,6 +106,7 @@ const TABS: { key: string; label: string; icon: LucideIcon }[] = [
   { key: "app", label: "应用", icon: SmartphoneIcon },
   { key: "service", label: "服务", icon: LayoutTemplateIcon },
   { key: "endpoint", label: "接口", icon: LinkIcon },
+  { key: "code_repo", label: "代码仓库", icon: GitBranchIcon },
 ];
 
 export default function AssetsPage() {
@@ -716,6 +718,68 @@ export default function AssetsPage() {
                     })}
                     mono
                   />
+                </TableCell>
+                <TableCell className="w-8 pl-0">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="size-7 text-muted-foreground hover:text-destructive"
+                    onClick={() => openDelete([a.id])}
+                    aria-label={`删除资产 ${a.url || a.id}`}
+                  >
+                    <Trash2Icon className="size-3.5" />
+                  </Button>
+                </TableCell>
+              </TableRow>
+            ))}
+          </AssetCard>
+        </TabsContent>
+
+        {/* 代码仓库 */}
+        <TabsContent value="code_repo" className="mt-0 flex min-h-0 flex-1 flex-col gap-2">
+          {searchBox}
+          <AssetCard
+            cols={["", "仓库地址", "名称", "SHA-256 / 元数据", ""]}
+            loaded={loaded}
+            total={total}
+            page={page}
+            size={size}
+            onSize={setSize}
+            onPage={setPage}
+            rows={currentRows}
+            selected={selected}
+            onToggleAll={(ids) => toggleSelectAll(ids)}
+          >
+            {slice(tabData("code_repo")).map((a) => (
+              <TableRow key={a.id} className={selected.has(a.id) ? "bg-muted/40" : undefined}>
+                <TableCell className="w-8 pr-0">
+                  <Checkbox checked={selected.has(a.id)} onCheckedChange={() => toggleSelect(a.id)} />
+                </TableCell>
+                <TableCell className="max-w-md truncate font-mono text-xs" title={a.url}>
+                  {a.url || "—"}
+                </TableCell>
+                <TableCell className="text-xs font-medium">{a.app_name || "—"}</TableCell>
+                <TableCell className="max-w-sm">
+                  <div className="flex flex-wrap items-center gap-1">
+                    {a.extra && typeof a.extra === "object" ? (
+                      <>
+                        {a.extra.sha256 ? (
+                          <Badge variant="outline" className="font-mono text-[10px]">
+                            {String(a.extra.sha256).slice(0, 12)}…
+                          </Badge>
+                        ) : null}
+                        {Object.entries(a.extra as Record<string, unknown>)
+                          .filter(([k]) => k !== "sha256")
+                          .map(([k, v]) => (
+                            <Badge key={k} variant="secondary" className="font-mono text-[10px]">
+                              {k}={String(v)}
+                            </Badge>
+                          ))}
+                      </>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">—</span>
+                    )}
+                  </div>
                 </TableCell>
                 <TableCell className="w-8 pl-0">
                   <Button

@@ -5,6 +5,7 @@ import * as React from "react";
 import {
   ChevronLeftIcon,
   ChevronRightIcon,
+  GitBranchIcon,
   GlobeIcon,
   KeyRoundIcon,
   LayoutTemplateIcon,
@@ -63,6 +64,7 @@ const TABS: { key: NewAssetType; label: string; icon: LucideIcon }[] = [
   { key: "app", label: "应用", icon: SmartphoneIcon },
   { key: "service", label: "服务", icon: LayoutTemplateIcon },
   { key: "endpoint", label: "接口", icon: LinkIcon },
+  { key: "code_repo", label: "代码仓库", icon: GitBranchIcon },
 ];
 
 function firstText(values: Array<string | undefined>, fallback: string): string {
@@ -85,6 +87,8 @@ function assetLabel(asset: Asset): string {
     }
     case "endpoint":
       return firstText([[asset.method, asset.url].filter(Boolean).join(" ")], `#${asset.id}`);
+    case "code_repo":
+      return firstText([asset.url, asset.app_name], `#${asset.id}`);
   }
 }
 
