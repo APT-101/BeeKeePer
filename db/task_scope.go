@@ -135,6 +135,28 @@ func (s *AssetStore) AddAutoScope(taskID int64, assetType, domain, rawURL, ip st
 		if c := ipToHostCIDR(ip); c != "" {
 			return s.upsertTaskScope(TaskScope{TaskID: taskID, Kind: "ip", Net: c})
 		}
+	case "code_repo":
+		// P0 代码审计：代码仓库非网络资产，不自动加 IP/域名 scope。
+		// clone 目标域名需模型显式 add_task_scope 登记（fail-closed 天然安全）。
+		// 但仓库地址里若带主机（https://git.example.com/xx.git 或 git@git.example.com:xx.git），
+		// 把它登记为 subdomain scope，让 egress 白名单可以直接放行 clone/依赖安装。
+		if rawURL != "" {
+			// ssh 格式 git@host:path — 提取 host
+			if strings.HasPrefix(rawURL, "git@") {
+				if i := strings.Index(rawURL, ":"); i > 4 {
+					h := DomainKey(rawURL[4:i])
+					if h != "" && net.ParseIP(h) == nil {
+						return s.upsertTaskScope(TaskScope{TaskID: taskID, Kind: "subdomain", Domain: h})
+					}
+					return nil
+				}
+			}
+			host, _, _ := parseURL(normalizeURL(rawURL))
+			host = DomainKey(host)
+			if host != "" && net.ParseIP(host) == nil {
+				return s.upsertTaskScope(TaskScope{TaskID: taskID, Kind: "subdomain", Domain: host})
+			}
+		}
 	}
 	return nil
 }

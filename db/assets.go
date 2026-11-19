@@ -662,6 +662,74 @@ RETURNING id`, req.Name, catVal, descVal, icpVal, companyIDVal, companySource, t
 }
 
 // =====================================================================
+// UpsertCodeRepo — P0 代码审计：代码仓库资产（git 地址 / 压缩包哈希）
+// =====================================================================
+
+// UpsertCodeRepoReq is the input for UpsertCodeRepo.
+// RepoURL: git 仓库地址（https/ssh）或工作空间的相对路径（zip 解包时）。
+// Name: 可选友好名。SHA256: 可选内容摘要（zip 上传时必填）。
+// Extra: 任意附加元数据（如 clone 状态、来源、语言指纹）。
+type UpsertCodeRepoReq struct {
+	RepoURL string
+	Name    string
+	SHA256  string
+	Extra   map[string]any
+	TaskID  int64
+}
+
+// UpsertCodeRepo inserts or merges a code_repo asset. Uniqueness: url (repo
+// address). task_ids merge. Extra JSONB merges shallowly (new keys win).
+func (s *AssetStore) UpsertCodeRepo(req UpsertCodeRepoReq) (int64, error) {
+	if req.RepoURL == "" {
+		return 0, fmt.Errorf("repo url is required")
+	}
+	if s.tx == nil {
+		return s.withCompanyScopeMutation(func(scoped *AssetStore) (int64, error) {
+			return scoped.UpsertCodeRepo(req)
+		})
+	}
+	var taskIDs string
+	if req.TaskID > 0 {
+		taskIDs = fmt.Sprintf("{%d}", req.TaskID)
+	} else {
+		taskIDs = "{}"
+	}
+	extraJSON := []byte("{}")
+	if len(req.Extra) > 0 {
+		if b, err := json.Marshal(req.Extra); err == nil {
+			extraJSON = b
+		}
+	}
+	var nameVal, extraVal any
+	if req.Name != "" {
+		nameVal = req.Name
+	}
+	extra := map[string]any{}
+	if len(req.Extra) > 0 {
+		for k, v := range req.Extra {
+			extra[k] = v
+		}
+	}
+	if req.SHA256 != "" {
+		extra["sha256"] = req.SHA256
+	}
+	extraJSON, _ = json.Marshal(extra)
+	extraVal = extraJSON
+
+	var id int64
+	err := s.tx.QueryRow(`
+INSERT INTO assets(type, url, app_name, extra, task_ids)
+VALUES ('code_repo', $1, $2, $3, $4::bigint[])
+ON CONFLICT (url) WHERE type = 'code_repo' DO UPDATE SET
+    app_name = COALESCE(EXCLUDED.app_name, assets.app_name),
+    extra    = assets.extra || EXCLUDED.extra,
+    task_ids = (SELECT ARRAY(SELECT DISTINCT unnest(assets.task_ids || EXCLUDED.task_ids))),
+    last_seen = now()
+RETURNING id`, req.RepoURL, nameVal, extraVal, taskIDs).Scan(&id)
+	return id, err
+}
+
+// =====================================================================
 // UpsertHTTPService
 // =====================================================================
 

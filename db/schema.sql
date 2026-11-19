@@ -40,7 +40,7 @@ CREATE TRIGGER trg_companies_upd BEFORE UPDATE ON companies
 CREATE TABLE IF NOT EXISTS assets (
     id              BIGSERIAL PRIMARY KEY,
     type            TEXT NOT NULL CHECK (type IN (
-                        'root_domain','ip','subdomain','app','service','endpoint'
+                        'root_domain','ip','subdomain','app','service','endpoint','code_repo'
                     )),
     company_id      BIGINT REFERENCES companies(id) ON DELETE SET NULL,
     -- explicit: caller/user selected the company; scope: derived from company_scope.
@@ -89,6 +89,12 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_av2_service_http ON assets(url) WHERE type 
 CREATE UNIQUE INDEX IF NOT EXISTS uq_av2_service_other
     ON assets(COALESCE(domain,''), COALESCE(ip,''), port, service_name) WHERE type = 'service' AND service_type = 'other';
 CREATE UNIQUE INDEX IF NOT EXISTS uq_av2_endpoint     ON assets(url, method) WHERE type = 'endpoint';
+CREATE UNIQUE INDEX IF NOT EXISTS uq_av2_code_repo    ON assets(url) WHERE type = 'code_repo';
+-- P0 代码审计：存量库的 type CHECK 需放行 code_repo（显式 DROP+ADD 幂等）。
+-- Postgres 自动命名表级 CHECK 为 assets_type_check；显式约束名也要处理。
+ALTER TABLE assets DROP CONSTRAINT IF EXISTS assets_type_check;
+ALTER TABLE assets ADD CONSTRAINT assets_type_check
+    CHECK (type IN ('root_domain','ip','subdomain','app','service','endpoint','code_repo'));
 CREATE INDEX IF NOT EXISTS idx_av2_company      ON assets(company_id)       WHERE company_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_av2_company_type ON assets(company_id, type) WHERE company_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_av2_task_ids     ON assets USING GIN(task_ids);

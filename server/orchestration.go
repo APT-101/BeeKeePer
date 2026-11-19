@@ -40,7 +40,8 @@ func jsonResult(v any) (actool.Result, error) {
 func (s *Server) hostTools() ([]actool.CoreTool, map[string][]string) {
 	tools := append(s.m.HostTools(), s.orchestrationTools()...)
 	tools = append(tools, s.findingRetestTools()...)
-	tools = append(tools, s.platformTools()...) // 平台操作工具(建改 skill/工具/MCP，给 Auto 用)
+	tools = append(tools, s.platformTools()...)   // 平台操作工具(建改 skill/工具/MCP，给 Auto 用)
+	tools = append(tools, s.codeAuditTools()...) // P0 代码审计工具族（默认绑定 worker）
 	custom, err := s.customTools()
 	if err != nil {
 		log.Printf("[custom-tool] 加载失败: %v", err)
@@ -489,6 +490,12 @@ func (s *Server) seedOrchestrationTools() {
 	for _, t := range s.platformTools() {
 		schema, _ := json.Marshal(t.InputSchema())
 		_ = s.m.PG().SeedTool(t.Name(), t.Description(), schema, autoAgents)
+	}
+	// P0 代码审计工具族：默认绑定 worker（审计执行发生在 worker 上下文）。
+	workerAgents, _ := json.Marshal([]string{"worker"})
+	for _, t := range s.codeAuditTools() {
+		schema, _ := json.Marshal(t.InputSchema())
+		_ = s.m.PG().SeedTool(t.Name(), t.Description(), schema, workerAgents)
 	}
 	s.refreshBuiltinToolSchemas()
 	s.seedAutoDefaultBindings()

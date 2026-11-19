@@ -63,6 +63,12 @@ type assetInputItem struct {
 	// ---- endpoint ----
 	Method string           `json:"method"`
 	Params []map[string]any `json:"params"`
+
+	// ---- code_repo ----
+	RepoURL string `json:"repo_url"`
+	RepoName string `json:"repo_name"`
+	RepoSHA256 string `json:"repo_sha256"`
+	RepoExtra map[string]any `json:"repo_extra"`
 }
 
 // insertAssets is the unified insert_assets agent tool.
@@ -81,7 +87,7 @@ func (t *ToolSet) insertAssets() actool.CoreTool {
 				"items": obj(map[string]any{
 					"type": map[string]any{
 						"type":        "string",
-						"enum":        []string{"root_domain", "ip", "subdomain", "app", "service", "endpoint"},
+						"enum":        []string{"root_domain", "ip", "subdomain", "app", "service", "endpoint", "code_repo"},
 						"description": "资产类型",
 					},
 					// root_domain / subdomain
@@ -143,6 +149,14 @@ func (t *ToolSet) insertAssets() actool.CoreTool {
 						"type":        "array",
 						"description": "请求参数列表，每条含 location(query/body/header/path)/name/value/type（可选，追加不覆盖）",
 						"items":       map[string]any{"type": "object"},
+					},
+					// code_repo
+					"repo_url":    str("代码仓库地址（git https/ssh，或工作空间内已上传压缩包的相对路径如 uploads/app.zip；code_repo 类型必填）"),
+					"repo_name":   str("仓库友好名（可选，如 project-web）"),
+					"repo_sha256": str("压缩包内容 SHA-256（zip 上传场景必填，git 地址可省）"),
+					"repo_extra": map[string]any{
+						"type":        "object",
+						"description": "仓库附加元数据（可选，如语言/框架/分支）",
 					},
 				}, "type"),
 			},
@@ -254,6 +268,15 @@ func (t *ToolSet) insertAssets() actool.CoreTool {
 						TaskID: taskID,
 					})
 
+				case "code_repo":
+					id, err = t.as.UpsertCodeRepo(db.UpsertCodeRepoReq{
+						RepoURL: item.RepoURL,
+						Name:    item.RepoName,
+						SHA256:  item.RepoSHA256,
+						Extra:   item.RepoExtra,
+						TaskID:  taskID,
+					})
+
 				default:
 					errs = append(errs, errEntry{Index: i, Error: "unknown type: " + typ})
 					continue
@@ -287,7 +310,13 @@ func (t *ToolSet) insertAssets() actool.CoreTool {
 					if svcIP == "" {
 						svcIP = item.IP
 					}
-					_ = t.as.AddAutoScope(taskID, typ, item.Domain, item.URL, svcIP)
+					// code_repo 的仓库地址在 repo_url（url 字段为空）——scope 登记
+					// 必须用 repo_url，仓库域名才会进 egress 白名单（clone 放行）。
+					rawURL := item.URL
+					if typ == "code_repo" {
+						rawURL = item.RepoURL
+					}
+					_ = t.as.AddAutoScope(taskID, typ, item.Domain, rawURL, svcIP)
 				}
 			}
 
