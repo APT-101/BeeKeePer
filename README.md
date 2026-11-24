@@ -247,6 +247,11 @@ CGO_ENABLED=0 go build -tags embedui -o artex ./cmd/artex
 
 **常用参数**：`./start.sh -addr :8787 -proxy :8788`（`-addr` 前端+API，`-proxy` 流量录制代理）。启动脚本会把参数原样透传给 `artex`。
 
+**IoT 固件审计**（可选，见「IoT 固件安全审计」章节）：
+
+- IDA 反编译：系统配置页「反编译（IDA 无头导出）」卡片填 IDA 安装目录与 INP.py 路径；或环境变量 `ARTEX_IDA_DIR`（回退链：设置 → env → PATH 里的 `idat`）。作业超时/勾选上限/产物配额同卡片可调（`decompile_timeout_seconds` / `decompile_max_components` / `decompile_task_quota_mb`）。
+- 沙箱解包工具：真实厂商固件需要镜像里有 `unsquashfs`（squashfs-tools）；`INP.py` 随仓库分发，配置里指向它即可，无需拷进 IDA plugins 目录。
+
 ---
 
 
@@ -276,7 +281,71 @@ CGO_ENABLED=0 go build -tags embedui -o artex ./cmd/artex
 
 ---
 
-## 2.0 扩展规划（v1.0.1 起）
+## IoT 固件安全审计（v2.0 已落地）
+
+> 2.0 规划中的固件静态审计已实现端到端闭环：**上传固件 → agent 自主解包并登记 → 组件登记与状态机 → IDA 无头反编译 → 逐组件审计 → 发现落库**。真实厂商固件（714MB IMG 容器 + squashfs rootfs，9410 函数 C++ 服务）实测全链路通过。
+
+### 使用流程
+
+```
+建任务（目标写清固件审计方向）
+  → 任务详情「固件组件」页签点「上传固件」（≤1GB，自动算 sha256）
+      · 落盘 tasks/<id>/firmware/（agent 解包链路的约定目录）
+      · 同名同内容复用；同名不同内容自动插摘要前缀（RP09_3f9a1c2d.bin），绝不覆盖
+  → 对话下达目标（"解包固件，逐组件找漏洞"）
+  → agent 自主执行：
+      解包（tar/gzip/unsquashfs/python 扫 magic…）→ register_extract 登记解包根
+      → insert_components 登记服务组件（web/mqtt/telnet/upnp…）
+      → set_component_status 推进状态机 pending→running→completed
+      → report_finding 上报漏洞（文件行级证据）
+  → 「固件反编译」页签勾选组件/文件建 IDA 导出作业，人工查伪 C 代码
+```
+
+### 模块分工
+
+| 位置 | 作用 |
+|---|---|
+| 任务详情「固件组件」页签 | 上传固件、看本任务组件与挖掘进度（状态筛选即覆盖度）、挂载/移除 |
+| 任务详情「固件反编译」页签 | 勾选组件或按 binary_path 建 IDA 导出作业，浏览函数列表与伪 C 代码（人工查阅通道，不进 agent 工具集） |
+| 侧边栏「固件组件」全局页 | 跨任务组件库总视图：DSL 搜索、按固件筛选、批量改状态、手工登记 |
+
+- **组件库与任务解耦**：组件是全局资产（跨任务共享），任务通过 `task_component_links` 挂载；幂等键 `(COALESCE(firmware_sha256,''), type, component_name, COALESCE(version,''))`。
+- **解包登记**：`firmware_extracts` 记录"哪份固件解到了哪个相对路径"，反编译与 binary_path 校验都按解包根定位；完整性判定用**递归文件数**（≥20），兼容 OpenWrt squashfs 顶级少目录形态。
+
+### 固件反编译（IDA 无头导出）
+
+- **配置**：系统配置页「反编译（IDA 无头导出）」卡片填 IDA 安装目录（含 `idat`）与 INP.py 路径，卡片实时探测并红/绿回显。回退链：设置值 → `ARTEX_IDA_DIR` → PATH。
+- **机制**：单并发（IDA 许可）作业队列；`INP.py` 无头导出每个函数的伪 C（默认关 ctree 控体积），落 `data/tasks/<id>/decompile/<sha8>/out/`，索引含调用图。
+- **断点续跑与崩溃自愈**：进度按批次落 `.export_progress`，重启自动恢复；处理每个函数前写 `.export_current` 哨兵——idat 若在某函数上 abort（进程级崩溃），下轮重试自动跳过该崩点继续前进，全部走完自动清除哨兵。
+- **完成判定**：以 INP 的 `Export completed` 标记为准（产物落盘完整即成功），idat 退出清理阶段的偶发 SIGABRT 不再误判失败。
+
+### 沙箱解包工具
+
+固件解包由沙箱容器执行，镜像需含解包工具（基础镜像自带 tar/gzip/python3）：
+
+```bash
+# 在宿主给沙箱镜像补齐（临时联网装包后 commit）
+docker run --name fw-tools --entrypoint /bin/sh -v /tmp/setup.sh:/setup.sh artex-sandbox:latest /setup.sh
+docker commit fw-tools artex-sandbox:latest && docker rm fw-tools
+# setup.sh: apt-get install -y squashfs-tools binwalk file cpio mtools
+```
+
+真实厂商固件常见 squashfs 段——`unsquashfs` 必装；binwalk 可选（agent 可用 python3 扫 magic 定位子镜像）。
+
+### LLM 故障转移池
+
+多 LLM profile 自动容错：当前 profile 欠费/限流/宕机/404 时按优先级自动切换，全局熔断器 + 冷却梯子（1min/5min/30min）防止反复探测。
+
+```json
+// 系统配置页开启 llm_pool_enabled；链路 = 激活 profile 优先，其余按 priority
+GET /api/llm/pool   # 查看 chain 与各 profile 健康状态（fails/trips/cooldown）
+```
+
+实测：`local-fast` 网关 404 故障窗口期间，任务意图自动切备用 profile 继续执行，无需人工干预。
+
+---
+
+
 
 > 当前系统聚焦 Web 站点资产的漏洞挖掘与渗透测试。v1.0.1 版本号起，规划扩展为多资产类型平台：在**不改动核心引擎（planner/worker/探索图/决策卡/finding/报告）**的前提下，通过「资产类型扩展 + 类型化沙箱 + 执行通道」三个增量挂点承载新形态资产。
 
@@ -301,7 +370,7 @@ BEEKEEPER 服务端（Linux 容器沙箱）
 | **PC 程序** | DSH 主机本机评估：进程/文件/注册表/服务/网络行为/畸形输入（只读红线） | — |
 | **Android** | 模拟器 + adb：安装/启动/遍历/dumpsys/logcat/抓包 | frida hook、脱壳 |
 | **iOS** | 未涉及 | 未涉及 |
-| **固件** | binwalk 解包 / 密钥与配置提取（静态） | 需 ARM 主机动态运行 |
+| **固件** | ✅ **已落地**：全链路审计（上传→解包登记→组件状态机→IDA 无头反编译→发现落库） | 需 ARM 主机动态运行 |
 | **代码审计** | git + SAST/SCA/Secret + code_verify 静态动态闭环 | — |
 | **AI 原生应用** | 集成 [Tencent AI-Infra-Guard](https://github.com/Tencent/AI-Infra-Guard)（外挂引擎）：Agent/Skills/MCP/Infra Scan + LLM Jailbreak Eval | — |
 
@@ -311,7 +380,7 @@ BEEKEEPER 服务端（Linux 容器沙箱）
 |---|---|
 | **P0** | 代码审计：code_repo 资产 + container-code 沙箱 + code_scan_* 工具 + 静态动态闭环 |
 | **P1** | 资产模型扩展（mobile_app / binary / code_repo / ai_app）+ 任务类型分流 + 前端页面架构 |
-| **P2** | 二进制（desktop_app + firmware 静态）执行链 |
+| **P2** | ✅ 二进制（firmware 静态）执行链——已落地并实测：IoT 固件全链路审计（见上文） |
 | **P3** | 移动端（Android 模拟器 + adb）执行通道 |
 | **P4** | AI 原生应用（AI-Infra-Guard 外挂集成） |
 | **P5** | 收束：各类型端到端真机验证 + 文档 |
