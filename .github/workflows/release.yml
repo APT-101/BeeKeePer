@@ -99,9 +99,13 @@ jobs:
 
   # ④ 多架构镜像 → 推 Docker Hub（复用 binaries 编好的 Linux 二进制，
   #    镜像里只装工具 + 放二进制；arm64 仅需模拟 apt 层，构建快很多）
+  #    secrets 未配置（DOCKERHUB_USERNAME/TOKEN 缺失）时优雅跳过——
+  #    Release 产物不依赖镜像推送，v1.0.1 曾因此被拖红整体结论。
   docker:
     needs: binaries
     runs-on: ubuntu-latest
+    if: ${{ secrets.DOCKERHUB_USERNAME != '' && secrets.DOCKERHUB_TOKEN != '' }}
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4 # 取 Dockerfile 与 skills/
       - uses: actions/download-artifact@v4
