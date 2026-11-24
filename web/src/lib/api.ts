@@ -1285,4 +1285,19 @@ export const api = {
     get<{ extracts: FirmwareExtractInfo[] }>("/firmware-extracts").then((r) => ({
       extracts: r?.extracts ?? [],
     })),
+
+  // 固件上传：直接落到 tasks/<id>/firmware/（agent 解包链路的约定目录），后端算 sha256。
+  uploadFirmware: async (id: string, file: File) => {
+    if (MOCK) return { name: file.name, sha256: "demo", size: file.size, path: `tasks/${id}/firmware/${file.name}`, reused: false };
+    const fd = new FormData();
+    fd.append("file", file);
+    const token = getToken();
+    const r = await fetch(`/api/tasks/${encodeURIComponent(id)}/firmware`, {
+      method: "POST",
+      headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      body: fd,
+    });
+    if (!r.ok) throw new Error(`上传失败: ${r.status}`);
+    return r.json() as Promise<{ name: string; sha256: string; size: number; path: string; reused: boolean }>;
+  },
 };

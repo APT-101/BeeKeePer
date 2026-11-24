@@ -2,7 +2,7 @@
 
 import * as React from "react";
 
-import { BinaryIcon, Loader2Icon, PackageIcon, RefreshCwIcon, RotateCcwIcon, UnlinkIcon } from "lucide-react";
+import { BinaryIcon, Loader2Icon, PackageIcon, RefreshCwIcon, RotateCcwIcon, UnlinkIcon, UploadIcon } from "lucide-react";
 import Link from "next/link";
 import { toast } from "sonner";
 
@@ -220,6 +220,27 @@ export function ComponentsTab({ taskId }: { taskId: string }) {
     }
   };
 
+  // ---- 固件上传：POST /api/tasks/{id}/firmware，落 tasks/<id>/firmware/（agent 解包链路的约定目录） ----
+  const fwInputRef = React.useRef<HTMLInputElement | null>(null);
+  const [uploadingFw, setUploadingFw] = React.useState(false);
+  const uploadFirmware = async (file: File) => {
+    setUploadingFw(true);
+    try {
+      const res = await api.uploadFirmware(taskId, file);
+      toast.success(
+        res.reused
+          ? `固件已存在：${res.name}（sha256 ${res.sha256.slice(0, 12)}…）`
+          : `已上传 ${res.name} · sha256 ${res.sha256.slice(0, 12)}…`,
+      );
+      toast.info("下一步：在对话里让 agent 解包该固件（解包后自动 register_extract 登记解包根）");
+    } catch (err) {
+      toast.error(`上传失败：${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setUploadingFw(false);
+      if (fwInputRef.current) fwInputRef.current.value = "";
+    }
+  };
+
   // ---- 批量：勾选后统一改状态 / 移除挂载 ----
   // 改状态复用组件库那条接口（POST /api/components/status），带 task_id 走任务守卫；
   // 移除挂载复用已有的单条 DELETE，不新增接口。
@@ -290,9 +311,29 @@ export function ComponentsTab({ taskId }: { taskId: string }) {
             本任务从固件里解出并登记的组件。状态即挖掘进度：待挖 → 挖掘中 → 已挖完 / 不挖。
           </CardDescription>
         </div>
-        <Button variant="outline" size="sm" onClick={() => void load()} disabled={loading}>
-          <RefreshCwIcon className={loading ? "size-4 animate-spin" : "size-4"} /> 刷新
-        </Button>
+        <div className="flex flex-row items-center gap-2">
+          <input
+            ref={fwInputRef}
+            type="file"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) void uploadFirmware(f);
+            }}
+          />
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => fwInputRef.current?.click()}
+            disabled={uploadingFw}
+            title="上传固件到 tasks/<id>/firmware/，供 agent 解包与反编译使用（≤1GB）"
+          >
+            {uploadingFw ? <Loader2Icon className="size-4 animate-spin" /> : <UploadIcon className="size-4" />} 上传固件
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => void load()} disabled={loading}>
+            <RefreshCwIcon className={loading ? "size-4 animate-spin" : "size-4"} /> 刷新
+          </Button>
+        </div>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
         <div className="flex flex-wrap items-center gap-2">

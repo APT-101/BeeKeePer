@@ -876,6 +876,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/decompile/jobs/{jobID}/log", s.decompileLog)
 	mux.HandleFunc("GET /api/decompile/jobs/{jobID}/names", s.decompileNames)
 	mux.HandleFunc("POST /api/tasks/{id}/components", s.attachTaskComponents)
+	mux.HandleFunc("POST /api/tasks/{id}/firmware", s.taskFirmwareUpload)
 	mux.HandleFunc("DELETE /api/tasks/{id}/components/{componentID}", s.detachTaskComponent)
 	mux.HandleFunc("GET /api/tasks/{id}/intent-components", s.taskIntentComponents)
 	mux.HandleFunc("GET /api/components", s.listComponents)
