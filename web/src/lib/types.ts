@@ -937,6 +937,23 @@ export interface Settings {
   // worker/主 agent/对话)由 noa 接管上下文压缩,取代内置 compaction;每 run 读一次,对
   // 之后启动的 run 生效。
   noa_compaction?: boolean;
+  // 反编译（IDA 无头导出）。路径空=未配置，后端依次回退 ARTEX_IDA_DIR → PATH 里的 idat。
+  decompile_ida_install_dir?: string;
+  decompile_idat_plugin_path?: string;
+  decompile_timeout_seconds?: number;
+  decompile_max_components?: number;
+  decompile_task_quota_mb?: number;
+  // 只读回显：idat / INP.py 是否真的可用，设置页据此提示，不用建 job 才发现。
+  decompile_status?: {
+    ok: boolean;
+    ida_dir?: string;
+    idat?: string;
+    plugin?: string;
+    error?: string;
+    timeout_seconds?: number;
+    max_components?: number;
+    quota_mb?: number;
+  };
 }
 
 // ---- LLM config ----

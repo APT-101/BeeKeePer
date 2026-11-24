@@ -32,6 +32,15 @@ const (
 	decompileIdlePoll     = 10 * time.Second   // 队列空时的兜底轮询（不能只靠 kick，否则进程外插的 pending 会饿死）
 )
 
+// decompile_* 设置键（settings 表；系统配置页「反编译」卡片读写）。
+const (
+	settingDecompileIDA      = "decompile_ida_install_dir"
+	settingDecompilePlugin   = "decompile_idat_plugin_path"
+	settingDecompileTimeout  = "decompile_timeout_seconds"
+	settingDecompileMaxComps = "decompile_max_components"
+	settingDecompileQuotaMB  = "decompile_task_quota_mb"
+)
+
 // decompileConfig 是 decompile_* 这组设置解析后的结果（settings 表里没写的用默认值）。
 // 键名见 IOT-AUDIT-反编译集成方案.md §8；系统配置页还没铺这组键，先由 DB 直读。
 type decompileConfig struct {
@@ -750,4 +759,34 @@ func (d *decompiler) stopAll() {
 	for _, c := range cms {
 		killProcessGroup(c)
 	}
+}
+
+// decompileStatus 回显 idat 是否可用，设置页据此提示「找不到 IDA」而不是让人建 job 才失败。
+func (s *Server) decompileStatus() map[string]any {
+	if s.decomp == nil {
+		return map[string]any{"ok": false, "error": "反编译能力未启用"}
+	}
+	cfg := s.decomp.config()
+	idat, plugin, err := s.decomp.locateIDA(cfg)
+	out := map[string]any{
+		"ok":              err == nil,
+		"ida_dir":         cfg.idaDir,
+		"timeout_seconds": int(cfg.timeout.Seconds()),
+		"max_components":  cfg.maxComps,
+		"quota_mb":        cfg.quotaBytes >> 20,
+	}
+	if err != nil {
+		out["error"] = err.Error()
+		return out
+	}
+	out["idat"] = idat
+	// 显示实际生效的插件脚本：用户自定义路径优先，否则默认 <plugins>/INP.py。
+	pluginScript := cfg.pluginPath
+	if pluginScript == "" {
+		pluginScript = filepath.Join(plugin, "INP.py")
+	} else if !filepath.IsAbs(pluginScript) {
+		pluginScript = filepath.Join(plugin, pluginScript)
+	}
+	out["plugin"] = pluginScript
+	return out
 }

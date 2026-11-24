@@ -44,6 +44,15 @@ ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`, key
 	return err
 }
 
+// GetString returns the stored value or def when the key is unset/unreadable.
+func (d *DB) GetString(key, def string) string {
+	v, ok, err := d.GetSetting(key)
+	if err != nil || !ok {
+		return def
+	}
+	return v
+}
+
 // GetBool returns the boolean setting, or def when unset/unparseable.
 func (d *DB) GetBool(key string, def bool) bool {
 	v, ok, err := d.GetSetting(key)

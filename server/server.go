@@ -3362,6 +3362,14 @@ func (s *Server) settingsPayload() map[string]any {
 		// 实验功能:noa 模型驱动上下文压缩(默认关)。开启后平台接入的四类 agent 由 noa
 		// 接管上下文压缩,取代内置 compaction;每 run 读一次,对之后启动的 run 生效。
 		"noa_compaction": s.m.NoaCompactionEnabled(),
+		// IoT 固件反编译（IDA 无头导出）。路径空=未配置，后端依次回退 ARTEX_IDA_DIR → PATH 里的 idat。
+		"decompile_ida_install_dir":  strings.TrimSpace(s.m.pg.GetString(settingDecompileIDA, "")),
+		"decompile_idat_plugin_path": strings.TrimSpace(s.m.pg.GetString(settingDecompilePlugin, "")),
+		"decompile_timeout_seconds":  s.decompileStatus()["timeout_seconds"],
+		"decompile_max_components":   s.decompileStatus()["max_components"],
+		"decompile_task_quota_mb":    s.decompileStatus()["quota_mb"],
+		// 只读回显：idat / INP.py 是否真的可用，设置页据此提示，不用建 job 才发现。
+		"decompile_status": s.decompileStatus(),
 	}
 }
 
@@ -3426,6 +3434,12 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		ConstraintsInjectWorker  *bool `json:"constraints_inject_worker"`
 		// 实验功能:noa 上下文压缩开关(默认关);每 run 读,对之后启动的 run 生效,无需重建 agent。
 		NoaCompaction *bool `json:"noa_compaction"`
+		// 反编译（IDA 无头导出）配置。路径传空字符串=清空（依次回退 ARTEX_IDA_DIR → PATH）。
+		DecompileIDADir   *string `json:"decompile_ida_install_dir"`
+		DecompilePlugin   *string `json:"decompile_idat_plugin_path"`
+		DecompileTimeout  *int    `json:"decompile_timeout_seconds"`
+		DecompileMaxComps *int    `json:"decompile_max_components"`
+		DecompileQuotaMB  *int    `json:"decompile_task_quota_mb"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, 400, err.Error())
@@ -3449,6 +3463,49 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 	if req.NoaCompaction != nil {
 		// 每 run 读的解析器,切换即时对之后启动的 run 生效,无需 applyLLM 重建。
 		if err := s.m.SetNoaCompaction(*req.NoaCompaction); err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+	}
+	// 反编译设置：路径即时生效（locateIDA 以「目录+插件」为缓存键），限额下次建 job 生效。
+	if req.DecompileIDADir != nil {
+		if err := s.m.pg.SetSetting(settingDecompileIDA, strings.TrimSpace(*req.DecompileIDADir)); err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+	}
+	if req.DecompilePlugin != nil {
+		if err := s.m.pg.SetSetting(settingDecompilePlugin, strings.TrimSpace(*req.DecompilePlugin)); err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+	}
+	if req.DecompileTimeout != nil {
+		if *req.DecompileTimeout < 60 || *req.DecompileTimeout > 86400 {
+			writeErr(w, 400, "单 job 超时必须在 60–86400 秒之间")
+			return
+		}
+		if err := s.m.pg.SetSetting(settingDecompileTimeout, strconv.Itoa(*req.DecompileTimeout)); err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+	}
+	if req.DecompileMaxComps != nil {
+		if *req.DecompileMaxComps < 1 || *req.DecompileMaxComps > 32 {
+			writeErr(w, 400, "单次勾选上限必须在 1–32 之间")
+			return
+		}
+		if err := s.m.pg.SetSetting(settingDecompileMaxComps, strconv.Itoa(*req.DecompileMaxComps)); err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+	}
+	if req.DecompileQuotaMB != nil {
+		if *req.DecompileQuotaMB < 1 || *req.DecompileQuotaMB > 102400 {
+			writeErr(w, 400, "任务产物配额必须在 1–102400 MB 之间")
+			return
+		}
+		if err := s.m.pg.SetSetting(settingDecompileQuotaMB, strconv.Itoa(*req.DecompileQuotaMB)); err != nil {
 			writeErr(w, 500, err.Error())
 			return
 		}
