@@ -1377,6 +1377,10 @@ CREATE TABLE IF NOT EXISTS components (
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- 组件幂等键：insert_components 的 ON CONFLICT 按表达式列集判重（42P10 = 缺此索引）。
+-- 固件内同名同版本同类型的组件（同 sha）只占一行；NULL sha 用 COALESCE 归一成 ''。
+CREATE UNIQUE INDEX IF NOT EXISTS uq_components_firmware_key
+    ON components (COALESCE(firmware_sha256,''), type, component_name, COALESCE(version,''));
 -- 任务 ↔ 组件挂载与来源（agent 登记 / 人工挂载各占一行语义）。
 CREATE TABLE IF NOT EXISTS task_component_links (
     task_id        BIGINT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
