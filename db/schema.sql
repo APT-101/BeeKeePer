@@ -1419,7 +1419,10 @@ CREATE TABLE IF NOT EXISTS firmware_extracts (
     firmware_sha256 TEXT NOT NULL DEFAULT '',
     extract_path    TEXT NOT NULL,
     note            TEXT NOT NULL DEFAULT '',
+    created_by      TEXT NOT NULL DEFAULT '',
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE (task_id, firmware_sha256)
 );
+-- 存量升级：早期建表缺 created_by（worker 登记来源）。
+ALTER TABLE firmware_extracts ADD COLUMN IF NOT EXISTS created_by TEXT NOT NULL DEFAULT '';
