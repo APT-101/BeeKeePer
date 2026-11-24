@@ -374,8 +374,11 @@ func (d *decompiler) run(j *db.DecompileJob) {
 			if len(logText) > 0 {
 				_, _ = d.pg.InsertLog("info", "decompile", fmt.Sprintf("job %d (%s)\n%s", j.ID, j.BinaryPath, logText))
 			}
-			ok := werr == nil && strings.Contains(logText, "Export completed") && done > 0
-			if !ok {
+			// INP 打出 "Export completed" 即产物已完整落盘——这是权威完成标志。
+			// idat 偶发在"退出清理阶段" SIGABRT（如上次崩溃残留的 minidump 处理），
+			// 退出码非零但产物无损：此时按成功处理，退出异常降级为日志。
+			completed := strings.Contains(logText, "Export completed")
+			if !completed || done == 0 {
 				msg := lastNonEmptyLine(logText)
 				switch {
 				case werr != nil && msg != "":
@@ -387,6 +390,9 @@ func (d *decompiler) run(j *db.DecompileJob) {
 				}
 				fail(msg, 0, done)
 				return
+			}
+			if werr != nil {
+				log.Printf("[decompile] job %d 导出完成但 idat 退出异常（产物已完整，忽略）: %v", j.ID, werr)
 			}
 			if err := buildDecompileIndex(exportAbs, outDir, j.BinaryPath, j.BinarySha256); err != nil {
 				fail("建函数索引失败: "+err.Error(), total, done)

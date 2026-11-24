@@ -767,6 +767,24 @@ def export_decompiled_functions(export_dir, skip_existing=True):
     else:
         # 加载之前的进度
         processed_addrs, prev_failed, prev_skipped = load_progress(export_dir)
+        # 崩溃自愈：上次 idat abort 来不及写进度，但 .export_current 里留着当时
+        # 正在反编译的函数地址——那就是崩点。本轮直接跳过，不撞同一堵墙。
+        # （.export_current 由主循环在处理每个函数前原子覆盖写入。）
+        try:
+            cur_path = os.path.join(export_dir, ".export_current")
+            if os.path.exists(cur_path):
+                with open(cur_path, 'r', encoding='utf-8') as cf:
+                    _crash_addr_txt = cf.read().strip()
+                if _crash_addr_txt:
+                    crash_addr = int(_crash_addr_txt, 16)
+                    if crash_addr and crash_addr not in processed_addrs:
+                        skipped_funcs.append((crash_addr, idc.get_func_name(crash_addr),
+                                              "crashed previous run (idat abort at this function)"))
+                        processed_addrs.add(crash_addr)
+                        print("[!] Skipping {:X} ({}) — idat crashed on it last run".format(
+                            crash_addr, idc.get_func_name(crash_addr)))
+        except Exception as _cur_err:
+            print("[!] .export_current recovery skipped: {}".format(str(_cur_err)))
     failed_funcs.extend(prev_failed)
     skipped_funcs.extend(prev_skipped)
 
@@ -805,6 +823,10 @@ def export_decompiled_functions(export_dir, skip_existing=True):
 
     if len(remaining_funcs) == 0:
         print("[+] All functions already exported!")
+        try:
+            os.remove(os.path.join(export_dir, ".export_current"))
+        except OSError:
+            pass
         io_executor.shutdown(wait=False)
         if CTREE_EXPORT_ENABLED:
             _ctree_write_manifest(export_dir, ctree_dir, ctree_errors)
@@ -861,6 +883,13 @@ def export_decompiled_functions(export_dir, skip_existing=True):
         gc.collect()  # 两次收集确保清理
 
     for idx, func_ea in enumerate(remaining_funcs):
+        # 处理前记录"当前函数"：idat 若在此函数上 abort（进程级崩溃，Python 接不住），
+        # 下次启动恢复进度时会读到它并自动跳过——跳数递增，最终绕过所有崩点。
+        try:
+            with open(os.path.join(export_dir, ".export_current"), 'w', encoding='utf-8') as cf:
+                cf.write("{:X}".format(func_ea))
+        except Exception:
+            pass
         # 实时获取函数信息（不缓存）
         func_name = idc.get_func_name(func_ea)
 
@@ -1037,6 +1066,12 @@ def export_decompiled_functions(export_dir, skip_existing=True):
 
     # 最终保存进度
     save_progress(export_dir, processed_addrs, failed_funcs, skipped_funcs)
+
+    # 全流程正常走完：清掉崩溃哨兵（下次全新任务不误跳过任何函数）
+    try:
+        os.remove(os.path.join(export_dir, ".export_current"))
+    except OSError:
+        pass
 
     # 导出健康自检 + 格式版本（供下游判断产物是否可信）
     _write_export_health(export_dir, decompile_dir, health_stats,
