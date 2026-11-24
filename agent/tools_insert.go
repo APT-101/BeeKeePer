@@ -22,6 +22,14 @@ func (t *ToolSet) SetAssetStore(as *db.AssetStore, cs *db.CompanyStore) {
 	t.cs = cs
 }
 
+// SetComponentStore wires the firmware component store + extract registry onto
+// this ToolSet so the insert_components / list_components / set_component_status /
+// register_extract tools are active (IoT 固件审计；store 经 DB.DataDir 供宿主路径校验).
+func (t *ToolSet) SetComponentStore(comp *db.ComponentStore, fwx *db.FirmwareExtractStore) {
+	t.comp = comp
+	t.fwx = fwx
+}
+
 // assetInputItem is one element of the insert_assets "assets" array.
 type assetInputItem struct {
 	Type string `json:"type"` // root_domain|ip|subdomain|app|service|endpoint
@@ -604,6 +612,9 @@ func (t *ToolSet) WorkerTools() []actool.CoreTool {
 		// asset management (handlers guard nil store internally)。
 		// add_company_scope 不给 worker：定义企业资产范围属规划/主控/Auto 的职责，worker 只执行探索。
 		t.insertAssets(), t.listAssets(),
+		// IoT 固件组件（handlers guard nil store internally）：
+		// register_extract 只给 worker —— 解包是 worker 的活，解完登记，后续意图复用。
+		t.insertComponents(), t.listComponents(), t.registerExtract(),
 		// 跨 work 回看：worker 也可复用其他 work 的观察，避免重复劳动。
 		// search_all_worker_traces：不必先知道 intent_id，按关键字全局捞命中步骤；
 		// get_worker_trace：锁定某条 work 后列步骤/就地搜/取完整内容。
@@ -629,6 +640,8 @@ func (t *ToolSet) MainAgentTools() []actool.CoreTool {
 		t.setConstraints(),
 		// asset management (handlers guard nil store internally)
 		t.insertAssets(), t.addCompanyScope(), t.listAssets(),
+		// IoT 固件组件（handlers guard nil store internally）
+		t.insertComponents(), t.listComponents(), t.setComponentStatus(), t.registerExtract(),
 		t.addFinding(), t.recordFact(),
 		t.addTaskScope(),
 		// list_untested_assets：按需查本任务范围内未测资产(类型+分页)，自行决定补测。

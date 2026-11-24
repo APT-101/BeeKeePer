@@ -5,6 +5,25 @@ import "database/sql"
 // Settings is a tiny key-value store for global app config the UI toggles at
 // runtime (e.g. traffic_capture). Missing keys fall back to caller defaults.
 
+// SettingsByPrefix returns every setting whose key starts with prefix.
+// Callers (e.g. the decompile_* config block) apply their own defaults.
+func (d *DB) SettingsByPrefix(prefix string) (map[string]string, error) {
+	rows, err := d.Query(`SELECT key, value FROM settings WHERE key LIKE $1`, prefix+"%")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]string{}
+	for rows.Next() {
+		var k, v string
+		if err := rows.Scan(&k, &v); err != nil {
+			return nil, err
+		}
+		out[k] = v
+	}
+	return out, rows.Err()
+}
+
 // GetSetting returns the stored value and ok=false when the key is unset.
 func (d *DB) GetSetting(key string) (value string, ok bool, err error) {
 	err = d.QueryRow(`SELECT value FROM settings WHERE key=$1`, key).Scan(&value)

@@ -63,6 +63,10 @@ type Server struct {
 	bus     *events.Bus
 	metrics *metrics.Registry
 
+	// decomp 是 IoT 固件的 IDA 无头反编译作业队列（并发固定 1，见 decompile.go）。
+	// dataDir 为空（无 DB）时保持 nil，API 层显式 503 降级。
+	decomp *decompiler
+
 	skillDir string // root directory for skill subdirectories
 	jwtKey   []byte // HS256 signing key loaded from / generated into dataDir/jwt.key
 
@@ -183,6 +187,8 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string, keyDi
 		provByProfile: map[int64]*provEntry{}, llmHealth: newLLMHealthRegistry(m.pg),
 		taskAgents: map[string]*taskAgentBundle{}, archiveWake: make(chan struct{}, 1)}
 	s.initSideQuestions()
+	// IoT 固件反编译作业队列（并发 1；无 DB/无 dataDir 时 decompile API 显式降级）。
+	s.decomp = newDecompiler(dataDir, m.pg)
 	// M0 platform observability: one in-process bus + one metrics registry. The
 	// bus is strictly observational (publish is fire-and-forget), so wiring it
 	// cannot change any enforcement behavior.
@@ -855,6 +861,30 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/tasks/{id}/assets", s.attachTaskAssets)
 	mux.HandleFunc("DELETE /api/tasks/{id}/assets/{assetID}", s.detachTaskAsset)
 	mux.HandleFunc("GET /api/tasks/{id}/intent-assets", s.taskIntentAssets)
+
+	// IoT 固件审计：组件库 + IDA 无头反编译（移植自 ARTEX-IOT，见 decompile.go / components_api.go）
+	mux.HandleFunc("POST /api/tasks/{id}/decompile", s.decompileCreate)
+	mux.HandleFunc("GET /api/tasks/{id}/decompile/jobs", s.decompileTaskJobs)
+	mux.HandleFunc("GET /api/decompile/jobs", s.decompileList)
+	mux.HandleFunc("GET /api/decompile/jobs/{jobID}", s.decompileGet)
+	mux.HandleFunc("POST /api/decompile/jobs/{jobID}/cancel", s.decompileCancel)
+	mux.HandleFunc("POST /api/decompile/jobs/{jobID}/retry", s.decompileRetry)
+	mux.HandleFunc("DELETE /api/decompile/jobs/{jobID}", s.decompileDelete)
+	mux.HandleFunc("GET /api/decompile/jobs/{jobID}/functions", s.decompileFunctions)
+	mux.HandleFunc("GET /api/decompile/jobs/{jobID}/code/{addr}", s.decompileCode)
+	mux.HandleFunc("GET /api/decompile/jobs/{jobID}/search", s.decompileSearch)
+	mux.HandleFunc("GET /api/decompile/jobs/{jobID}/log", s.decompileLog)
+	mux.HandleFunc("GET /api/decompile/jobs/{jobID}/names", s.decompileNames)
+	mux.HandleFunc("POST /api/tasks/{id}/components", s.attachTaskComponents)
+	mux.HandleFunc("DELETE /api/tasks/{id}/components/{componentID}", s.detachTaskComponent)
+	mux.HandleFunc("GET /api/tasks/{id}/intent-components", s.taskIntentComponents)
+	mux.HandleFunc("GET /api/components", s.listComponents)
+	mux.HandleFunc("GET /api/components/counts", s.componentCounts)
+	mux.HandleFunc("GET /api/firmware-extracts", s.firmwareExtracts)
+	mux.HandleFunc("POST /api/components", s.insertComponentsHTTP)
+	mux.HandleFunc("POST /api/components/{id}/status", s.setComponentStatusHTTP)
+	mux.HandleFunc("POST /api/components/status", s.batchComponentStatus)
+	mux.HandleFunc("DELETE /api/components", s.deleteComponents)
 
 	// 工作空间文件管理器（针对 workDir）
 	mux.HandleFunc("GET /api/workspace/list", s.wsList)

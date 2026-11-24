@@ -139,6 +139,7 @@ func (s *Server) writePivotHint(ctx context.Context, t *Task, hint string) {
 	ts := agent.NewToolSet(t.Store, "worker")
 	if s.m.Assets() != nil {
 		ts.SetAssetStore(s.m.Assets(), s.m.Assets().Companies())
+		ts.SetComponentStore(s.m.Components(), s.m.FirmwareExtracts())
 	}
 	ts.SetNotify(t.Notify)
 	ts.SetNotifyHint(t.NotifyHint)

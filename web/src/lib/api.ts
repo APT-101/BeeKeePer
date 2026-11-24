@@ -21,11 +21,19 @@ import type {
   Company,
   CompanyScopeMutation,
   CompanyScopeRule,
+  Component,
+  ComponentStatus,
   Conversation,
   ConvTokenSummary,
   CoverageAssetRefs,
   CoverageGraphData,
   DailyTokenBucket,
+  DecompileCode,
+  DecompileFunc,
+  DecompileJob,
+  DecompileJobDetail,
+  DecompileSearchHit,
+  DecompileStatus,
   DeleteTaskOptions,
   DeleteTaskResult,
   Edge,
@@ -42,6 +50,7 @@ import type {
   FindingsPage,
   FindingTraffic,
   FindingTrafficDetail,
+  FirmwareExtractInfo,
   IntentAsset,
   InterceptApprovalRow,
   InterceptDetail,
@@ -75,6 +84,7 @@ import type {
   TaskAssetMutation,
   TaskAssetScopeMutation,
   TaskCategory,
+  TaskComponentMutation,
   TaskConstraint,
   TaskGoal,
   TaskLLMResolutions,
@@ -1160,4 +1170,119 @@ export const api = {
   // 202 即返回，实际下载在后台跑，进度走 /api/update/stream。
   applyUpdate: () => post<{ ok: boolean; target: string }>(`/update/apply`),
   rollbackUpdate: () => post<{ ok: boolean }>(`/update/rollback`),
+
+  // ---- components（IoT 固件组件库：固件解包出来的可指认组件） ----
+  // 服务端分页：传 limit/offset，拿回这一页 + 命中总数。
+  components: (type = "", status = "", firmware = "", limit = 50, offset = 0) =>
+    get<{ count: number; total: number; components: Component[] }>(
+      `/components?type=${encodeURIComponent(type)}${status ? `&status=${encodeURIComponent(status)}` : ""}${firmware ? `&firmware=${encodeURIComponent(firmware)}` : ""}&limit=${limit}&offset=${offset}`,
+    ).then((r) => ({ components: r?.components ?? [], total: r?.total ?? r?.count ?? 0 })),
+  searchComponents: (dsl: string, type = "", status = "", firmware = "", limit = 50, offset = 0) =>
+    get<{ count: number; total: number; components: Component[] }>(
+      `/components?dsl=${encodeURIComponent(dsl)}${type ? `&type=${encodeURIComponent(type)}` : ""}${status ? `&status=${encodeURIComponent(status)}` : ""}${firmware ? `&firmware=${encodeURIComponent(firmware)}` : ""}&limit=${limit}&offset=${offset}`,
+    ).then((r) => ({ components: r?.components ?? [], total: r?.total ?? r?.count ?? 0 })),
+  componentCounts: (taskId = "") =>
+    get<Record<string, number>>(`/components/counts${taskId ? `?task_id=${encodeURIComponent(taskId)}` : ""}`),
+  // 按固件 sha256 汇总（组件页固件筛选下拉）
+  componentFirmwareCounts: (taskId = "") =>
+    get<Record<string, number>>(
+      `/components/counts?by=firmware${taskId ? `&task_id=${encodeURIComponent(taskId)}` : ""}`,
+    ),
+  // 按挖掘状态汇总（pending/running/completed/ignored）
+  componentStatusCounts: (taskId = "") =>
+    get<Record<string, number>>(
+      `/components/counts?by=status${taskId ? `&task_id=${encodeURIComponent(taskId)}` : ""}`,
+    ),
+  // 手工登记（组件页「新增组件」；不带 task_id 时只进组件库，不挂任务）
+  insertComponents: (body: {
+    task_id?: number;
+    components?: { type: string; component_name: string; version?: string; vendor?: string;
+      binary_path?: string; config_path?: string; started_by?: string; port?: number;
+      notes?: string; firmware_sha256?: string }[];
+  }) => post<{ inserted: number; updated: number; ids: number[] }>("/components", body),
+  deleteComponents: (ids: number[]) =>
+    http<{ deleted: number }>("/components", { method: "DELETE", body: JSON.stringify({ ids }) }),
+  // taskId 非空时后端按任务守卫（组件必须在该任务范围内）
+  setComponentStatus: (ids: number[], status: ComponentStatus, taskId = "") =>
+    Promise.all(
+      ids.map((id) =>
+        post<{ ok: boolean }>(`/components/${id}/status`, {
+          status,
+          ...(taskId ? { task_id: Number(taskId) } : {}),
+        }),
+      ),
+    ),
+  // 批量改状态：一次请求、一条 UPDATE
+  setComponentsStatus: (ids: number[], status: ComponentStatus, taskId = "") =>
+    post<{ ok: boolean; status: ComponentStatus; changed: number; requested: number }>("/components/status", {
+      ids,
+      status,
+      ...(taskId ? { task_id: Number(taskId) } : {}),
+    }),
+  // 任务视角：同一接口带 task_id
+  taskComponents: (taskId: string, type = "", status = "", firmware = "", limit = 50, offset = 0) =>
+    get<{ count: number; total: number; components: Component[] }>(
+      `/components?task_id=${encodeURIComponent(taskId)}&type=${encodeURIComponent(type)}${status ? `&status=${encodeURIComponent(status)}` : ""}${firmware ? `&firmware=${encodeURIComponent(firmware)}` : ""}&limit=${limit}&offset=${offset}`,
+    ).then((r) => ({ components: r?.components ?? [], total: r?.total ?? r?.count ?? 0 })),
+  searchTaskComponents: (taskId: string, dsl: string, type = "", status = "", firmware = "", limit = 50, offset = 0) =>
+    get<{ count: number; total: number; components: Component[] }>(
+      `/components?task_id=${encodeURIComponent(taskId)}&dsl=${encodeURIComponent(dsl)}&type=${encodeURIComponent(type)}${status ? `&status=${encodeURIComponent(status)}` : ""}${firmware ? `&firmware=${encodeURIComponent(firmware)}` : ""}&limit=${limit}&offset=${offset}`,
+    ).then((r) => ({ components: r?.components ?? [], total: r?.total ?? r?.count ?? 0 })),
+  attachTaskComponents: (taskId: string, componentIds: number[], sourceSummary: string) =>
+    post<TaskComponentMutation>(`/tasks/${taskId}/components`, {
+      component_ids: componentIds,
+      source_summary: sourceSummary,
+    }),
+  detachTaskComponent: (taskId: string, componentId: number) =>
+    http<{ detached: number }>(`/tasks/${taskId}/components/${componentId}`, { method: "DELETE" }),
+
+  // ---- 反编译（IDA 无头 + INP）：任务内按组件批量导出 / 单文件导出，产物落任务目录 ----
+  decompileCreate: (taskId: string, body: { component_ids?: number[]; binary_path?: string }) =>
+    post<{
+      jobs: { id: number; component_id?: number | null; status: DecompileStatus; reused: boolean }[];
+      skipped?: string[];
+    }>(
+      `/tasks/${encodeURIComponent(taskId)}/decompile`,
+      body,
+    ),
+  decompileTaskJobs: (taskId: string) =>
+    get<{ jobs: DecompileJob[] }>(`/tasks/${encodeURIComponent(taskId)}/decompile/jobs`).then((r) => ({
+      jobs: r?.jobs ?? [],
+    })),
+  decompileJobs: (taskId?: string, status = "") =>
+    get<{ jobs: DecompileJob[] }>(
+      `/decompile/jobs?${taskId ? `task_id=${encodeURIComponent(taskId)}&` : ""}${status ? `status=${encodeURIComponent(status)}` : ""}`,
+    ).then((r) => ({ jobs: r?.jobs ?? [] })),
+  decompileJob: (jobId: number | string) =>
+    get<DecompileJobDetail>(`/decompile/jobs/${encodeURIComponent(String(jobId))}`),
+  decompileCancel: (jobId: number | string) =>
+    post<{ ok: boolean; status: DecompileStatus }>(`/decompile/jobs/${encodeURIComponent(String(jobId))}/cancel`),
+  decompileRetry: (jobId: number | string) =>
+    post<DecompileJob>(`/decompile/jobs/${encodeURIComponent(String(jobId))}/retry`),
+  decompileDelete: (jobId: number | string) =>
+    del<{ ok: boolean }>(`/decompile/jobs/${encodeURIComponent(String(jobId))}`),
+  decompileFunctions: (jobId: number | string, q = "", page = 1, limit = 200) =>
+    get<{ total: number; page: number; limit: number; items: DecompileFunc[] }>(
+      `/decompile/jobs/${encodeURIComponent(String(jobId))}/functions?q=${encodeURIComponent(q)}&page=${page}&limit=${limit}`,
+    ).then((r) => ({ total: r?.total ?? 0, page: r?.page ?? 1, limit: r?.limit ?? limit, items: r?.items ?? [] })),
+  decompileCode: (jobId: number | string, addr: string) =>
+    get<DecompileCode>(
+      `/decompile/jobs/${encodeURIComponent(String(jobId))}/code/${encodeURIComponent(addr)}`,
+    ),
+  decompileSearch: (jobId: number | string, q: string) =>
+    get<{ items: DecompileSearchHit[] }>(
+      `/decompile/jobs/${encodeURIComponent(String(jobId))}/search?q=${encodeURIComponent(q)}`,
+    ).then((r) => ({ items: r?.items ?? [] })),
+  decompileLog: (jobId: number | string) =>
+    get<{ status: DecompileStatus; log: string }>(`/decompile/jobs/${encodeURIComponent(String(jobId))}/log`),
+  decompileNames: (jobId: number | string) =>
+    get<{ names: string[] }>(`/decompile/jobs/${encodeURIComponent(String(jobId))}/names`).then((r) => ({
+      names: r?.names ?? [],
+    })),
+
+  // ---- 固件解包登记（组件页固件下拉：sha256 → 固件文件名） ----
+  firmwareExtracts: () =>
+    get<{ extracts: FirmwareExtractInfo[] }>("/firmware-extracts").then((r) => ({
+      extracts: r?.extracts ?? [],
+    })),
 };

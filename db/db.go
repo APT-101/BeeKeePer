@@ -90,7 +90,19 @@ func DSN() (dsn, source string, err error) {
 
 // DB wraps the shared *sql.DB. PG handles its own connection pool + concurrency
 // (MVCC), so unlike the old SQLite store there is no process-wide write mutex.
-type DB struct{ *sql.DB }
+type DB struct {
+	*sql.DB
+	// dir 是服务器数据根目录（-data），server 装配时经 SetDataDir 回填。
+	// 组件 / 固件解包等需要宿主任务目录（<dir>/tasks/<id>/…）的 store 与
+	// agent 工具经 DataDir() 取用；未回填时相关工具明确拒绝并提示。
+	dir string
+}
+
+// SetDataDir 回填服务器数据根目录（装配期一次）。
+func (d *DB) SetDataDir(dir string) { d.dir = dir }
+
+// DataDir 返回数据根目录；空串表示尚未装配（宿主路径类工具据此拒绝）。
+func (d *DB) DataDir() string { return d.dir }
 
 // ensureDatabase connects to the postgres system database and creates the target
 // database if it does not exist. dsn must be a postgres:// URL.
@@ -137,7 +149,7 @@ func Open(dsn string) (*DB, error) {
 		sqlDB.Close()
 		return nil, fmt.Errorf("ping postgres (%s): %w", config.Redact(dsn), err)
 	}
-	d := &DB{sqlDB}
+	d := &DB{DB: sqlDB}
 	// pgx runs multi-statement Exec via the simple protocol when there are no args.
 	// Keep the dedicated lock connection checked out until both DDL and seeding
 	// finish so concurrent application instances cannot initialize out of order.

@@ -484,6 +484,8 @@ func NewManager(dir, proxyAddr string) (*Manager, error) {
 		log.Printf("[llmusage] create table: %v", err)
 	}
 	m := &Manager{dir: dir, pg: pg, assets: pg.Assets(), tasks: map[string]*Task{}, interceptor: intercept.New(pg)}
+	// 数据根目录回填到 DB：组件/固件解包登记等需要宿主任务目录的 store 经 DB.DataDir() 取用。
+	pg.SetDataDir(dir)
 	if proxyAddr != "" {
 		tr, err := traffic.Open(filepath.Join(dir, "traffic"), proxyAddr)
 		if err != nil {
@@ -846,6 +848,11 @@ func (m *Manager) HostTools() []actool.CoreTool {
 func (m *Manager) Assets() *pgdb.AssetStore  { return m.assets }
 func (m *Manager) PG() *pgdb.DB              { return m.pg }
 func (m *Manager) Traffic() *traffic.Traffic { return m.traffic }
+
+// Components / FirmwareExtracts 返回 IoT 固件审计的组件与解包登记 store
+// （按需从 DB 构造；轻量结构体，无需缓存）。
+func (m *Manager) Components() *pgdb.ComponentStore         { return m.pg.Components() }
+func (m *Manager) FirmwareExtracts() *pgdb.FirmwareExtractStore { return m.pg.FirmwareExtracts() }
 
 // ProxyAddr returns the egress proxy address agents route target traffic through:
 //   - capture ON  → the recording MITM proxy (which itself exits via the global

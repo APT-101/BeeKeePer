@@ -76,6 +76,8 @@ type ToolSet struct {
 	findingRecorder FindingRecorder
 	as              *db.AssetStore   // asset store (optional; nil = asset tools not available)
 	cs              *db.CompanyStore // company store (optional)
+	comp            *db.ComponentStore     // 固件组件 store（可选；nil = IoT 组件工具不可用）
+	fwx             *db.FirmwareExtractStore // 固件解包登记 store（可选；与 comp 同进退）
 	ts              *db.ExplorationStore
 	worker          string
 	taskID          int64 // PG tasks.id; 0 when unknown (tests / orchestrator cross-task reads)

@@ -44,6 +44,8 @@ import { CoverageGraphTab } from "./_tabs/coverage-graph-tab";
 import { FindingsTab } from "./_tabs/findings-tab";
 import { GraphTab } from "./_tabs/graph-tab";
 import { InterceptTab } from "./_tabs/intercept-tab";
+import { ComponentsTab } from "./_tabs/components-tab";
+import { DecompileTab } from "./_tabs/decompile-tab";
 import { OverviewTab } from "./_tabs/overview-tab";
 import { ReportTab } from "./_tabs/report-tab";
 import { RetestsTab } from "./_tabs/retests-tab";
@@ -56,6 +58,8 @@ const TABS = [
   { value: "findings", label: "发现" },
   { value: "retests", label: "复测" },
   { value: "assets", label: "测试资产" },
+  { value: "components", label: "固件组件" },
+  { value: "decompile", label: "固件反编译" },
   { value: "coverage", label: "资产覆盖图" },
   { value: "intercept", label: "拦截审批" },
   { value: "report", label: "报告" },
@@ -432,6 +436,12 @@ function TaskDetailInner() {
         </TabsContent>
         <TabsContent value="assets" className="mt-0">
           <AssetsTab taskId={id} />
+        </TabsContent>
+        <TabsContent value="components" className="mt-0">
+          <ComponentsTab taskId={id} />
+        </TabsContent>
+        <TabsContent value="decompile" className="mt-0 min-h-0 overflow-hidden">
+          <DecompileTab taskId={id} />
         </TabsContent>
         <TabsContent value="coverage" className="mt-0">
           <CoverageGraphTab taskId={id} coverageEnabled={task?.coverage_enabled !== false} />

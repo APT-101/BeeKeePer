@@ -1347,3 +1347,79 @@ CREATE TABLE IF NOT EXISTS credential_access_log (
     at             TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_cred_access ON credential_access_log(credential_id, at DESC);
+
+-- =====================================================================
+-- IoT 固件审计（移植自 ARTEX-IOT 分支，作为独立体系与 assets 并行）
+-- =====================================================================
+
+-- 固件组件：一行 = 固件里的一个软件实体（lighttpd / mosquitto / roscore …）。
+-- type 合法取值见 db.ComponentKinds（web/mqtt/ros/ssh/telnet/upnp/onvif/rtsp/ftp/other）；
+-- 唯一性 = (COALESCE(firmware_sha256,''), type, component_name, COALESCE(version,''))，
+-- 重复登记补齐空字段而不是新增（UpsertComponents 的 ON CONFLICT）。
+CREATE TABLE IF NOT EXISTS components (
+    id              BIGSERIAL PRIMARY KEY,
+    type            TEXT DEFAULT 'other',
+    company_id      BIGINT REFERENCES companies(id) ON DELETE SET NULL,
+    task_ids        BIGINT[] NOT NULL DEFAULT '{}',
+    component_name  TEXT,
+    port            INTEGER CHECK (port BETWEEN 1 AND 65535),
+    technologies    TEXT[] NOT NULL DEFAULT '{}',
+    firmware_sha256 TEXT,
+    version         TEXT,
+    vendor          TEXT,
+    binary_path     TEXT,
+    config_path     TEXT,
+    started_by      TEXT,
+    status          TEXT NOT NULL DEFAULT 'pending',
+    notes           TEXT NOT NULL DEFAULT '',
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    last_seen       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- 任务 ↔ 组件挂载与来源（agent 登记 / 人工挂载各占一行语义）。
+CREATE TABLE IF NOT EXISTS task_component_links (
+    task_id        BIGINT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    component_id   BIGINT NOT NULL REFERENCES components(id) ON DELETE CASCADE,
+    source         TEXT NOT NULL DEFAULT 'system',
+    source_summary TEXT NOT NULL DEFAULT '',
+    source_node_id BIGINT,
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (task_id, component_id)
+);
+
+-- IDA 无头反编译作业：一个二进制一个作业，(task_id, binary_sha256) 天然去重；
+-- component_id 刻意不建外键——删组件不连带删已导出的产物。
+CREATE TABLE IF NOT EXISTS decompile_jobs (
+    id            BIGSERIAL PRIMARY KEY,
+    task_id       BIGINT NOT NULL,
+    component_id  BIGINT,
+    binary_path   TEXT NOT NULL,
+    binary_sha256 TEXT NOT NULL,
+    abs_path      TEXT NOT NULL,
+    export_dir    TEXT NOT NULL,
+    status        TEXT NOT NULL DEFAULT 'pending',
+    func_total    INTEGER NOT NULL DEFAULT 0,
+    func_done     INTEGER NOT NULL DEFAULT 0,
+    error         TEXT NOT NULL DEFAULT '',
+    created_by    TEXT NOT NULL DEFAULT '',
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    started_at    TIMESTAMPTZ,
+    finished_at   TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_decompile_jobs_task ON decompile_jobs(task_id, created_at DESC);
+
+-- 固件解包登记：一行 = 一份固件解到了任务目录下的哪个相对路径。
+-- register_extract 写入；binary_path 校验与反编译路径解析都按这些解包根定位。
+CREATE TABLE IF NOT EXISTS firmware_extracts (
+    id              BIGSERIAL PRIMARY KEY,
+    task_id         BIGINT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    firmware_name   TEXT NOT NULL DEFAULT '',
+    firmware_sha256 TEXT NOT NULL DEFAULT '',
+    extract_path    TEXT NOT NULL,
+    note            TEXT NOT NULL DEFAULT '',
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (task_id, firmware_sha256)
+);

@@ -98,6 +98,10 @@ func (d *DB) Assets() *AssetStore {
 // Companies returns the company store associated with this asset store.
 func (s *AssetStore) Companies() *CompanyStore { return s.company }
 
+// DB returns the underlying database handle, letting store-less callers
+// (agent ToolSet wiring) reach sibling stores such as Components().
+func (s *AssetStore) DB() *DB { return s.db }
+
 // withCompanyScopeMutation serializes scope resolution and every asset write
 // that consumes its result in one transaction. Nested asset side effects reuse
 // the same transaction through the scoped store.

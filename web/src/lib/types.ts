@@ -1472,3 +1472,125 @@ export interface InterceptExecution {
   seq: number;
   items: Activity[];
 }
+
+// =====================================================================
+// IoT 固件审计（移植自 ARTEX-IOT 分支）：组件 + IDA 无头反编译
+// =====================================================================
+
+export type ComponentKind =
+  | "web"
+  | "mqtt"
+  | "ros"
+  | "ssh"
+  | "telnet"
+  | "upnp"
+  | "onvif"
+  | "rtsp"
+  | "ftp"
+  | "other";
+
+// 与 tasks / findings 一致的状态词，不自造新词。
+export type ComponentStatus = "pending" | "running" | "completed" | "ignored";
+
+export interface Component {
+  id: number;
+  type: ComponentKind | string;
+  component_name: string;
+  version?: string;
+  vendor?: string;
+  binary_path?: string;
+  config_path?: string;
+  started_by?: string;
+  firmware_sha256?: string;
+  port?: number;
+  technologies?: string[];
+  status: ComponentStatus;
+  notes?: string;
+  company_id?: number;
+  task_ids: number[];
+  created_at?: string;
+  updated_at?: string;
+  last_seen?: string;
+  // 任务视角下由后端从 task_component_links 回填
+  task_source?: string;
+  task_source_summary?: string;
+  task_source_node_id?: number;
+}
+
+// 意图锚定的组件（worker 运行时下发的目标清单）。
+// IntentComponent 是某条意图锚定到的组件（后端按 (intent, component) 去重后下发）。
+export interface IntentComponent {
+  intent_id: number;
+  component_id: number;
+  type: ComponentKind | string;
+  component_name: string;
+  version?: string;
+  status?: ComponentStatus;
+  label: string; // 组件名 + 版本，直接可显示
+}
+
+export interface TaskComponentMutation {
+  requested: number;
+  attached: number;
+  existing: number;
+}
+
+// 固件解包登记（/api/firmware-extracts，按 sha256 去重后下发）。
+export interface FirmwareExtractInfo {
+  sha256: string;
+  name: string;
+  note?: string;
+  task_id?: number;
+}
+
+export type DecompileStatus = "pending" | "running" | "completed" | "failed" | "canceled";
+
+export interface DecompileJob {
+  id: number;
+  task_id: number;
+  // 列表接口回填的任务名（表里没有这一列）；重名时界面再补编号。
+  task_name?: string;
+  component_id?: number | null;
+  binary_path: string;
+  binary_sha256: string;
+  abs_path?: string;
+  export_dir: string;
+  status: DecompileStatus;
+  func_total: number;
+  func_done: number;
+  error?: string;
+  created_by?: string;
+  created_at?: string;
+  started_at?: string | null;
+  finished_at?: string | null;
+}
+
+export interface DecompileJobDetail extends DecompileJob {
+  artifact_bytes?: number;
+}
+
+export interface DecompileFunc {
+  addr: string;
+  name: string;
+  size: number;
+  callers?: string[];
+  callees?: string[];
+  file: string;
+}
+
+export interface DecompileCode {
+  addr: string;
+  name: string;
+  code: string;
+  truncated?: boolean;
+  size: number;
+  callers?: string[];
+  callees?: string[];
+}
+
+export interface DecompileSearchHit {
+  addr: string;
+  name?: string;
+  line: number;
+  text: string;
+}
