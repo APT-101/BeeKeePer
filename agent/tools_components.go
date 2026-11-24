@@ -77,7 +77,7 @@ func (t *ToolSet) insertComponents() actool.CoreTool {
 			"port":            intp("[单条] 主监听端口"),
 			"technologies":    map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "[单条] 依赖库/协议栈等特征"},
 			"status":          str("[单条] 初始状态 pending/running/completed/ignored，默认 pending"),
-			"firmware_sha256": str("[单条] 仅当该组件明确来自某个固件：固件 sha256(64 位十六进制)"),
+			"firmware_sha256": str("[单条] 本组件所属固件的 sha256(64 位十六进制)：登记固件组件时应填本任务解包登记的固件（firmware_extracts 记录的固件本身，不是解包产物）；漏填时系统会在任务仅有唯一固件或同名容器对（X.zip+X.img）时自动补关联"),
 			"notes":           str("[单条] 备注"),
 		}),
 		func(_ context.Context, in json.RawMessage) (actool.Result, error) {

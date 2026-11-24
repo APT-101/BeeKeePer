@@ -229,6 +229,29 @@ func (s *ComponentStore) UpsertComponents(taskIDs []int64, items []ComponentInpu
 		items[i].Status = st
 	}
 
+	// 固件归属自动回填：agent/用户登记组件常漏填 firmware_sha256（任务 299/300
+	// 实测 16 条全空，全局组件页按固件检索直接 0 结果）。登记任务只涉及唯一固件
+	// 或同名容器对（MX6000.zip 解出 MX6000.img）时自动补关联；真多固件任务归属
+	// 有歧义，保持为空等显式指定。
+	if len(taskIDs) > 0 {
+		need := false
+		for i := range items {
+			if strings.TrimSpace(items[i].FirmwareSha256) == "" {
+				need = true
+				break
+			}
+		}
+		if need {
+			if fw := s.firmwareShaForTasks(taskIDs); fw != "" {
+				for i := range items {
+					if strings.TrimSpace(items[i].FirmwareSha256) == "" {
+						items[i].FirmwareSha256 = fw
+					}
+				}
+			}
+		}
+	}
+
 	q := s.q()
 	// nil 切片会被驱动写成 NULL，而 task_ids 要求非空数组：空时用 '{}' 字面量。
 	var taskIDsArg any = "{}"
@@ -274,6 +297,70 @@ RETURNING id, (xmax = 0) AS created`,
 		ids = append(ids, id)
 	}
 	return inserted, updated, ids, nil
+}
+
+// firmwareShaForTasks 返回任务集合应关联的固件 sha256。
+// 任务登记的固件 sha 去重后恰好 1 个 → 直接用；多个但文件主名相同（容器与内容
+// 对，如 X.zip 解出 X.img）→ 取容器扩展名（zip/tar.gz 等）优先的 sha；其余
+// （真多固件）歧义，返回空串由登记方显式指定。
+func (s *ComponentStore) firmwareShaForTasks(taskIDs []int64) string {
+	rows, err := s.q().Query(`SELECT firmware_name, firmware_sha256 FROM firmware_extracts
+WHERE task_id = ANY($1) AND firmware_sha256 <> ''`, taskIDs)
+	if err != nil {
+		return ""
+	}
+	defer rows.Close()
+	type fwFile struct{ name, sha string }
+	seen := map[string]bool{}
+	var uniq []fwFile
+	for rows.Next() {
+		var n, sha string
+		if err := rows.Scan(&n, &sha); err != nil {
+			return ""
+		}
+		if !seen[sha] {
+			seen[sha] = true
+			uniq = append(uniq, fwFile{n, sha})
+		}
+	}
+	if len(uniq) == 0 {
+		return ""
+	}
+	if len(uniq) == 1 {
+		return uniq[0].sha
+	}
+	stripKnownExt := func(n string) string {
+		n = strings.ToLower(n)
+		for _, e := range []string{".tar.gz", ".tar.xz", ".tgz", ".zip", ".gz", ".xz", ".7z", ".rar", ".img", ".bin"} {
+			if strings.HasSuffix(n, e) {
+				return strings.TrimSuffix(n, e)
+			}
+		}
+		return n
+	}
+	base := stripKnownExt(uniq[0].name)
+	for _, f := range uniq[1:] {
+		if stripKnownExt(f.name) != base {
+			return "" // 主名不同：真多固件，不猜
+		}
+	}
+	// 同名容器对：容器扩展（压缩包）优先于裸内容（img/bin）。
+	rank := func(n string) int {
+		ln := strings.ToLower(n)
+		for i, e := range []string{".tar.gz", ".tgz", ".zip", ".tar.xz", ".gz", ".xz", ".7z", ".rar"} {
+			if strings.HasSuffix(ln, e) {
+				return i
+			}
+		}
+		return 99
+	}
+	best := uniq[0]
+	for _, f := range uniq[1:] {
+		if rank(f.name) < rank(best.name) {
+			best = f
+		}
+	}
+	return best.sha
 }
 
 // ListComponents returns components matching f, plus the total count for pagination.

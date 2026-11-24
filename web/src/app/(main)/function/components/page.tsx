@@ -408,11 +408,14 @@ export default function ComponentsPage() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="__all__">全部固件</SelectItem>
-              {Object.entries(firmwareCounts)
-                .filter(([sha]) => sha !== "")
-                .map(([sha, n]) => (
-                  <SelectItem key={sha} value={sha} title={`${firmwareName[sha] ?? "固件"} sha256: ${sha}`}>
-                    {firmwareName[sha] ?? "固件"} · {sha.slice(0, 12)} ({n})
+              {/* 主列表 = 全部解包登记的固件（firmwareExtracts），组件计数只作角标——
+                  只显示有组件的固件会让"刚解包还没登记组件"的固件永远搜不到 */}
+              {Object.entries(firmwareName)
+                .map(([sha, name]) => ({ sha, name, n: firmwareCounts[sha] ?? 0 }))
+                .sort((a, b) => b.n - a.n)
+                .map(({ sha, name, n }) => (
+                  <SelectItem key={sha} value={sha} title={`${name} sha256: ${sha}`}>
+                    {name} · {sha.slice(0, 12)} ({n})
                   </SelectItem>
                 ))}
             </SelectContent>
