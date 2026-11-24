@@ -471,12 +471,24 @@ func (t *ToolSet) registerExtract() actool.CoreTool {
 			if err != nil || !st.IsDir() {
 				return actool.Errorf("path 不是已存在的目录"), nil
 			}
-			entries, err := os.ReadDir(real)
-			if err != nil {
-				return actool.Errorf("读取目录失败: " + err.Error()), nil
+			// 完整性判定用递归文件数，不用顶级条目数：合法 rootfs（OpenWrt squashfs
+			// 解包形态）顶级只有 etc/lib/tmp/usr/www 这类少量目录，文件都在子目录里，
+			// 顶级计数会把完整 rootfs 误判成半成品。
+			files := 0
+			walkErr := filepath.WalkDir(real, func(p string, d os.DirEntry, err error) error {
+				if err != nil {
+					return nil // 无权限子树跳过，不阻断登记
+				}
+				if !d.IsDir() {
+					files++
+				}
+				return nil
+			})
+			if walkErr != nil {
+				return actool.Errorf("遍历目录失败: " + walkErr.Error()), nil
 			}
-			if len(entries) < 20 {
-				return actool.Errorf(fmt.Sprintf("目录里只有 %d 个条目，看起来是半成品；确认解包完整后再登记", len(entries))), nil
+			if files < 20 {
+				return actool.Errorf(fmt.Sprintf("目录里递归只有 %d 个文件，看起来是半成品；确认解包完整后再登记", files)), nil
 			}
 
 			fwName, fwSha, err := t.locateFirmwareFile(filepath.Join(taskDir, "firmware"), a.Firmware, real)
@@ -494,7 +506,7 @@ func (t *ToolSet) registerExtract() actool.CoreTool {
 				"abs_path":     real,
 				"firmware":     map[string]any{"value": fe.Name, "sha256": fe.Sha256},
 				"extract_id":   fe.ID,
-				"entries":      len(entries),
+				"entries":      files,
 				"already":      prev == fe.ExtractPath,
 				"previous":     prev,
 			})
