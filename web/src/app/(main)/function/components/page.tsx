@@ -70,6 +70,7 @@ export default function ComponentsPage() {
   const [confirmDelete, setConfirmDelete] = React.useState(false);
   const [counts, setCounts] = React.useState<Record<string, number>>({});
   const [firmwareCounts, setFirmwareCounts] = React.useState<Record<string, number>>({});
+  const [componentTaskIds, setComponentTaskIds] = React.useState<Set<string>>(new Set());
   // 任务 id → 任务名（列表里显示名字，重名靠 id 兜底）
   const [taskNames, setTaskNames] = React.useState<Record<string, string>>({});
   // 固件 sha256 → 固件文件名（值取自 task_scope.kind=firmware 的 value）
@@ -163,6 +164,11 @@ export default function ComponentsPage() {
       .componentFirmwareCounts()
       .then((c) => setFirmwareCounts(c ?? {}))
       .catch(() => setFirmwareCounts({}));
+    // 任务下拉只列有固件/组件关联的任务（纯 Web 渗透任务不属于固件组件模块）
+    api
+      .componentTaskIds()
+      .then((ids) => setComponentTaskIds(new Set(ids.map(String))))
+      .catch(() => setComponentTaskIds(new Set()));
   }, []);
 
   const startColDrag = (idx: number) => (e: React.MouseEvent) => {
@@ -433,6 +439,7 @@ export default function ComponentsPage() {
             <SelectContent>
               <SelectItem value="__all__">全部任务</SelectItem>
               {Object.entries(taskNames)
+                .filter(([id]) => componentTaskIds.size === 0 || componentTaskIds.has(id))
                 .sort((a, b) => Number(b[0]) - Number(a[0]))
                 .map(([id, name]) => (
                   <SelectItem key={id} value={id} title={`ID: ${id}`}>

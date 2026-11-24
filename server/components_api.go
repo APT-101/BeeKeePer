@@ -144,6 +144,17 @@ func (s *Server) componentCounts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	taskID, _ := strconv.ParseInt(r.URL.Query().Get("task_id"), 10, 64)
+	// by=task 时返回有固件/组件关联的任务 id 集合（组件页任务筛选下拉只列这些，
+	// 纯 Web 渗透任务不进固件组件模块）。
+	if r.URL.Query().Get("by") == "task" {
+		ids, err := as.FirmwareTaskIDs()
+		if err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+		writeJSON(w, 200, map[string]any{"task_ids": ids})
+		return
+	}
 	// by=firmware 时按固件 sha256 汇总（组件页的固件筛选下拉用）。
 	if r.URL.Query().Get("by") == "firmware" {
 		counts, err := as.FirmwareCounts(taskID)

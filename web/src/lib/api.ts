@@ -1188,6 +1188,9 @@ export const api = {
     get<Record<string, number>>(
       `/components/counts?by=firmware${taskId ? `&task_id=${encodeURIComponent(taskId)}` : ""}`,
     ),
+  // 有固件/组件关联的任务 id 集合（组件页任务筛选下拉只列这些，纯 Web 任务不出现）
+  componentTaskIds: () =>
+    get<{ task_ids: number[] }>(`/components/counts?by=task`).then((r) => r?.task_ids ?? []),
   // 按挖掘状态汇总（pending/running/completed/ignored）
   componentStatusCounts: (taskId = "") =>
     get<Record<string, number>>(

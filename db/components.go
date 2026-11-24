@@ -610,8 +610,30 @@ ORDER BY n.id, c.type, c.component_name`, taskID)
 }
 
 // FirmwareCounts 按固件 sha256 汇总组件数（空 key = 未归属固件），供组件页的固件筛选。
-func (s *ComponentStore) FirmwareCounts(taskID int64) (map[string]int, error) {
-	query := `SELECT COALESCE(firmware_sha256,''), count(*) FROM components`
+// FirmwareTaskIDs 返回与固件组件体系有关联的任务 id 集合：登记过固件解包
+// （firmware_extracts）或挂过组件（components.task_ids）的任务。全局组件页的
+// 任务筛选下拉只列这些——纯 Web 渗透任务不应出现在固件组件模块里。
+func (s *ComponentStore) FirmwareTaskIDs() ([]int64, error) {
+	rows, err := s.q().Query(`
+SELECT DISTINCT task_id FROM firmware_extracts WHERE task_id > 0
+UNION
+SELECT DISTINCT x FROM components, unnest(task_ids) AS x WHERE task_ids <> '{}'`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
+func (s *ComponentStore) FirmwareCounts(taskID int64) (map[string]int, error) {	query := `SELECT COALESCE(firmware_sha256,''), count(*) FROM components`
 	args := []any{}
 	if taskID > 0 {
 		args = append(args, taskID)
