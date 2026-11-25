@@ -101,11 +101,30 @@ jobs:
   #    镜像里只装工具 + 放二进制；arm64 仅需模拟 apt 层，构建快很多）
   #    secrets 未配置（DOCKERHUB_USERNAME/TOKEN 缺失）时优雅跳过——
   #    Release 产物不依赖镜像推送，v1.0.1 曾因此被拖红整体结论。
-  docker:
+  #    注意：GitHub 不允许在 job 级 if 里访问 secrets 上下文（整个 workflow
+  #    会解析失败、jobs=0 秒红，v1.0.3 tag 因此首跑失败）——必须拆 guard
+  #    job，在 step 的 env 里读 secrets 再以 output 传递开关。
+  docker-guard:
     needs: binaries
     runs-on: ubuntu-latest
-    if: ${{ secrets.DOCKERHUB_USERNAME != '' && secrets.DOCKERHUB_TOKEN != '' }}
-    continue-on-error: true
+    outputs:
+      enabled: ${{ steps.check.outputs.enabled }}
+    steps:
+      - id: check
+        env:
+          DU: ${{ secrets.DOCKERHUB_USERNAME }}
+          DT: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          if [ -n "$DU" ] && [ -n "$DT" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  docker:
+    needs: [binaries, docker-guard]
+    runs-on: ubuntu-latest
+    if: needs.docker-guard.outputs.enabled == 'true'
     steps:
       - uses: actions/checkout@v4 # 取 Dockerfile 与 skills/
       - uses: actions/download-artifact@v4
