@@ -86,6 +86,17 @@ func (dockerCLI) Ping(ctx context.Context) error {
 }
 
 func (dockerCLI) Create(ctx context.Context, cfg ContainerConfig) (string, error) {
+	if cfg.ID != "" {
+		// 幂等清理同名孤儿：服务非正常退出（如 pkill）后旧容器仍占名，重启后
+		// 首次 Create 必撞 "name already in use"（exit 125）而 fail-closed
+		// （实测任务 kali-fw-verify 重启后连续多次 Bash 全挂）。平台命名空间
+		// 专属（artex-sb-<task>），-f 不伤他物；不存在时 docker 静默成功。
+		rm := exec.CommandContext(ctx, "docker", "rm", "-f", cfg.ID)
+		var rmOut bytes.Buffer
+		rm.Stdout = &rmOut
+		rm.Stderr = &rmOut
+		_ = rm.Run() // 失败（不存在）无碍——只是幂等预清理
+	}
 	args := []string{"run", "-d"}
 	if cfg.ID != "" {
 		args = append(args, "--name", cfg.ID)
@@ -107,6 +118,20 @@ func (dockerCLI) Create(ctx context.Context, cfg ContainerConfig) (string, error
 	}
 	for _, e := range cfg.Env {
 		args = append(args, "-e", e)
+	}
+	// HOME 指向可写 tmpfs：rootfs 只读，/root 不可写——任何启动时建 ~/.config
+	// 的工具会 EROFS 静默失败（binwalk 实测 mkdir("/root/.config")=EROFS 后
+	// 零输出退出 0）。tmpfs 生命周期与容器一致，HOME 语义无害（git/ssh 等
+	// 仅在用户主动写配置时才触盘）。
+	hasHome := false
+	for _, e := range cfg.Env {
+		if strings.HasPrefix(e, "HOME=") {
+			hasHome = true
+			break
+		}
+	}
+	if !hasHome {
+		args = append(args, "-e", "HOME=/tmp")
 	}
 	if cfg.Network != "" && cfg.Network != "egress" {
 		args = append(args, "--network", cfg.Network)
@@ -244,7 +269,11 @@ func (p *ContainerProvider) New(ctx context.Context, taskID string, spec Spec) (
 	}
 	// 可写 scratch 区（readonly rootfs 下唯一可写目录）。tmpfs 保证容器停止后
 	// 即销毁；/workspace 与 /skills 只读挂载宿主数据。
-	cfg.Tmpfs = []string{"/tmp"}
+	// 可写 scratch 区（readonly rootfs 下唯一可写目录）。tmpfs 保证容器停止后
+	// 数据不留痕；exec 不可省——docker tmpfs 默认 noexec，不加会把代码审计
+	// 的"gcc 编译 + 运行产物"整条链堵死（实测任务 kali-code-verify 编译成功
+	// 但 ./test Permission denied）。tmpfs 隔离语义不变，进程仍随容器消失。
+	cfg.Tmpfs = []string{"/tmp:exec,rw,nosuid"}
 	if spec.Workspace != "" {
 		cfg.Binds = append(cfg.Binds, spec.Workspace+":/workspace:ro")
 	}

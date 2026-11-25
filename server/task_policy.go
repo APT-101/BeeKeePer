@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"log"
 	"net/http"
 	"slices"
 	"strconv"
@@ -45,6 +46,14 @@ func (m *Manager) m1EgressCheck(ctx context.Context, tool string, input json.Raw
 	targets := roe.ExtractTargets(tool, input)
 	if len(targets) == 0 {
 		return false, false, ""
+	}
+	// scope 登记即时生效：add_task_scope 只写 task_scope 行，重编译挂在沙箱
+	// 执行层（Bash/code 前 refresh），而 guard 拦截发生在更早的工具入口——
+	// 登记后的第一次网络调用仍会被旧白名单拦住，且永远走不到 refresh
+	// （实测任务 kali-web-verify 登记后三次重试全部死于此）。guard 读前
+	// 先重编译：变化感知使未变时零开销（不写库、不拆容器）。
+	if rerr := m.refreshTaskEgress(ctx, ri.TaskID); rerr != nil {
+		log.Printf("[egress] guard 前置重编译失败 task %d: %v", ri.TaskID, rerr)
 	}
 	e, err := m.pg.GetTaskEgress(ri.TaskID)
 	if err != nil || e == nil {
