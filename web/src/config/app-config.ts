@@ -4,8 +4,9 @@ const currentYear = new Date().getFullYear();
 
 export const APP_CONFIG = {
   name: "BEEKEEPER",
-  // 侧栏左上角字符 logo 的显示用短名（用户钦定；全名仍用于 title 等处）。
-  shortName: "BEEGUARD",
+  // 侧栏左上角字符 logo 的显示用短名（用户钦定 NS-5，致敬《机械公敌》机器人
+  // 型号；全名 BeeKeePer 仍用于 title、copyright 等处）。
+  shortName: "NS-5",
   version: packageJson.version,
   copyright: `© ${currentYear}, BeeKeePer.`,
   meta: {

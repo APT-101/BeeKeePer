@@ -69,7 +69,7 @@ export default function LoginPage() {
           <div className="absolute size-40 rounded-full border border-primary-foreground/20" />
           {/* 金色圆形 logo 直接置于深色面板（无白卡）——与深底预览一致 */}
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/logo.png" alt="BEEKEEPER" width={160} height={160} className="relative size-40 object-contain" />
+          <img src="/logo.png" alt="NS-5" width={160} height={160} className="relative size-40 object-contain" />
         </div>
       </div>
 

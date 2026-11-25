@@ -43,9 +43,12 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
           <SidebarMenuItem>
             <SidebarMenuButton asChild>
               <Link prefetch={false} href="/function/tasks">
+                {/* 主题感知 logo：浅色主题用浅底版（logo-light），深色主题用深底版（logo.png）。
+                    eslint-disable-next-line @next/next/no-img-element */}
+                <img src="/logo-light.png" alt="NS-5" width={32} height={32} className="shrink-0 object-contain dark:hidden" />
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src="/logo.png" alt="BEEKEEPER" width={32} height={32} className="shrink-0 object-contain" />
-                {/* 字符 logo：短显示名全大写 + 琥珀金渐变 + 适度字距（9 字符过长收缩为 KEEPER） */}
+                <img src="/logo.png" alt="NS-5" width={32} height={32} className="hidden shrink-0 object-contain dark:block" />
+                {/* 字符 logo：短显示名全大写 + 琥珀金渐变 + 适度字距（用户钦定 NS-5，致敬《机械公敌》） */}
                 <span className="bg-gradient-to-r from-amber-500 via-yellow-400 to-amber-500 bg-clip-text text-base font-bold tracking-[0.12em] text-transparent">
                   {APP_CONFIG.shortName}
                 </span>

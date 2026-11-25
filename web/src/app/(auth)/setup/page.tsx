@@ -63,7 +63,7 @@ export default function SetupPage() {
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src="/logo.png"
-            alt="BEEKEEPER"
+            alt="NS-5"
             width={160}
             height={160}
             className="relative"
