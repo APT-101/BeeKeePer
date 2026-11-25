@@ -250,7 +250,8 @@ CGO_ENABLED=0 go build -tags embedui -o artex ./cmd/artex
 **IoT 固件审计**（可选，见「IoT 固件安全审计」章节）：
 
 - IDA 反编译：系统配置页「反编译（IDA 无头导出）」卡片填 IDA 安装目录与 INP.py 路径；或环境变量 `ARTEX_IDA_DIR`（回退链：设置 → env → PATH 里的 `idat`）。作业超时/勾选上限/产物配额同卡片可调（`decompile_timeout_seconds` / `decompile_max_components` / `decompile_task_quota_mb`）。
-- 沙箱解包工具：真实厂商固件需要镜像里有 `unsquashfs`（squashfs-tools）；`INP.py` 随仓库分发，配置里指向它即可，无需拷进 IDA plugins 目录。
+- 沙箱镜像：环境变量 `ARTEX_SANDBOX_IMAGE` 指定 Bash/code 工具路由进的容器镜像（默认 `artex-sandbox:latest`）。固件/Web/代码审计建议切换 Kali 底座（内置 binwalk/unsquashfs/nmap/gcc 等约 41 个工具，见「沙箱镜像：Kali 底座」章节）：`export ARTEX_SANDBOX_IMAGE=artex-sandbox:kali`。
+- 固件反编译：`INP.py` 随仓库分发，配置里指向它即可，无需拷进 IDA plugins 目录。
 
 ---
 
@@ -319,18 +320,38 @@ CGO_ENABLED=0 go build -tags embedui -o artex ./cmd/artex
 - **断点续跑与崩溃自愈**：进度按批次落 `.export_progress`，重启自动恢复；处理每个函数前写 `.export_current` 哨兵——idat 若在某函数上 abort（进程级崩溃），下轮重试自动跳过该崩点继续前进，全部走完自动清除哨兵。
 - **完成判定**：以 INP 的 `Export completed` 标记为准（产物落盘完整即成功），idat 退出清理阶段的偶发 SIGABRT 不再误判失败。
 
-### 沙箱解包工具
+### 沙箱镜像：Kali 底座（推荐）
 
-固件解包由沙箱容器执行，镜像需含解包工具（基础镜像自带 tar/gzip/python3）：
+Bash / code 工具的命令在沙箱容器里执行。平台提供两个镜像选项，通过 `ARTEX_SANDBOX_IMAGE` 切换：
+
+| 镜像 | 内容 | 适用 |
+|---|---|---|
+| `artex-sandbox:latest`（默认） | 精简 Debian + 基础工具 | 纯 Web 探测 |
+| `artex-sandbox:kali` | Kali Rolling + 选装 41 工具 | Web 渗透 / 代码审计 / **固件检测**（推荐） |
+
+**Kali 镜像构建**（`Dockerfile.sandbox` 随仓库分发，构建约 20 分钟）：
 
 ```bash
-# 在宿主给沙箱镜像补齐（临时联网装包后 commit）
-docker run --name fw-tools --entrypoint /bin/sh -v /tmp/setup.sh:/setup.sh artex-sandbox:latest /setup.sh
-docker commit fw-tools artex-sandbox:latest && docker rm fw-tools
-# setup.sh: apt-get install -y squashfs-tools binwalk file cpio mtools
+# 国内网络：先经 mirror 拉基础镜像，Dockerfile 内已把 kali apt 源切清华
+docker pull docker.m.daocloud.io/kalilinux/kali-rolling:latest
+docker tag docker.m.daocloud.io/kalilinux/kali-rolling:latest kalilinux/kali-rolling:latest
+docker build -t artex-sandbox:kali -f Dockerfile.sandbox .
+
+# 启动时切换
+export ARTEX_SANDBOX_IMAGE=artex-sandbox:kali
 ```
 
-真实厂商固件常见 squashfs 段——`unsquashfs` 必装；binwalk 可选（agent 可用 python3 扫 magic 定位子镜像）。
+工具清单（选装非全量，逐组容错安装，单组包名漂移不阻断构建）：
+
+- **固件分析**：binwalk、sasquatch、squashfs-tools、cpio、mtools、dosfstools、foremost、exiftool
+- **Web 渗透**：nmap、sqlmap、nikto、gobuster、ffuf、whatweb、dirb、hydra、medusa
+- **密码/网络**：john、hashcat、netcat-openbsd、socat、tcpdump、tshark、dnsutils、whois、traceroute
+- **二进制分析**：gcc、g++、make（代码审计编译链）、radare2、gdb、strace、ltrace、pwntools
+- **基础**：python3/pip、git、jq、7z、openssh-client、iptables 等
+
+平台对镜像的兼容性约定（自动处理，无需配置）：容器以 `--read-only` + `tmpfs(/tmp:exec)` 运行（编译产物可执行、不留痕）、`HOME=/tmp`（只读 rootfs 下写 `~/.config` 的工具不再静默失败）、`--entrypoint ""`（基底镜像自带 ENTRYPOINT 也不影响）、启动前幂等清理同名孤儿容器。**egress 白名单**编译进容器 iptables：有 scope 时只放行登记目标，空白名单时 OUTPUT 全 DROP（本地命令照常，出网零放行）。
+
+**回滚**：去掉 `ARTEX_SANDBOX_IMAGE` 环境变量即回到默认镜像，旧镜像无需删除。
 
 ### LLM 故障转移池
 
