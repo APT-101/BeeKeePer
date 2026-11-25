@@ -1146,7 +1146,7 @@ func (s *Server) auditConfig(action, resourceType, resourceID string, before, af
 	}
 	s.bus.Publish(context.Background(), events.Event{
 		Kind:    events.EvConfigChanged,
-		Payload: ConfigChangedPayload{Actor: "beeguard", Action: action, ResourceType: resourceType, ResourceID: resourceID, Before: before, After: after},
+		Payload: ConfigChangedPayload{Actor: "admin", Action: action, ResourceType: resourceType, ResourceID: resourceID, Before: before, After: after},
 	})
 }
 

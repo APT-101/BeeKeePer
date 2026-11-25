@@ -48,8 +48,10 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                 <img src="/logo-light.png" alt="NS-5" width={32} height={32} className="shrink-0 object-contain dark:hidden" />
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src="/logo.png" alt="NS-5" width={32} height={32} className="hidden shrink-0 object-contain dark:block" />
-                {/* 字符 logo：短显示名全大写 + 琥珀金渐变 + 适度字距（用户钦定 NS-5，致敬《机械公敌》） */}
-                <span className="bg-gradient-to-r from-amber-500 via-yellow-400 to-amber-500 bg-clip-text text-base font-bold tracking-[0.12em] text-transparent">
+                {/* 字符 logo：短显示名 NS-5（用户钦定，致敬《机械公敌》）。
+                    颜色用语义前景色 text-foreground——跟随主题切换自动适配明暗，
+                    不再使用固定琥珀渐变。 */}
+                <span className="text-base font-bold tracking-[0.12em] text-foreground">
                   {APP_CONFIG.shortName}
                 </span>
               </Link>
