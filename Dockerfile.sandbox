@@ -1,0 +1,70 @@
+# =============================================================================
+# ARTEX 渗透测试沙箱镜像（Kali 底座）
+# =============================================================================
+# 平台约定（sandbox/container.go，与镜像解耦）：
+#   - entry 由 server 端强制覆盖（sleep infinity / egress iptables 脚本），
+#     镜像不设 ENTRYPOINT/CMD；
+#   - 容器以 --read-only 运行，仅 /tmp (tmpfs) 可写，/workspace 与 /skills
+#     只读挂载宿主任务数据——工具必须在构建期装全，运行期不可 apt；
+#   - 默认 CapDrop ALL；任务带 egress 白名单时加 NET_ADMIN 并由 entry 脚本
+#     在容器 netns 内配 iptables——iptables 必须预装；
+#   - docker exec <id> sh -c <cmd> 直接执行，Kali 自带 sh/bash 即可。
+#
+# 构建（真机）：docker build -t artex-sandbox:kali -f Dockerfile.sandbox .
+# 启用：ARTEX_SANDBOX_IMAGE=artex-sandbox:kali（server 启动 env）
+# =============================================================================
+FROM kalilinux/kali-rolling
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# kali apt 源切国内（清华 TUNA）——构建环境出海受限时 http.kali.org 不可达。
+# 用 http：base 镜像缺 CA 证书（ca-certificates 在核心批里装），包完整性由
+# apt GPG 签名校验保证；新版 kali-rolling 用 deb822 格式，兼容旧单文件格式。
+RUN set -e; \
+    if [ -f /etc/apt/sources.list.d/kali.sources ]; then \
+      printf 'Types: deb\nURIs: http://mirrors.tuna.tsinghua.edu.cn/kali\nSuites: kali-rolling\nComponents: main contrib non-free non-free-firmware\nSigned-By: /usr/share/keyrings/kali-archive-keyring.gpg\n' > /etc/apt/sources.list.d/kali.sources; \
+    else \
+      echo 'deb http://mirrors.tuna.tsinghua.edu.cn/kali kali-rolling main contrib non-free non-free-firmware' > /etc/apt/sources.list; \
+    fi
+
+# —— 核心批：平台依赖 + 确定在 kali 源里的包（失败即中止，保证底线能力）——
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      ca-certificates curl wget git jq \
+      unzip zip tar bzip2 xz-utils p7zip-full \
+      openssh-client vim less tree procps \
+      iputils-ping iproute2 iptables \
+      python3 python3-pip python3-requests python3-yaml \
+      file xxd binutils \
+    && rm -rf /var/lib/apt/lists/* /var/cache/apt/*
+
+# —— 渗透批：逐组容错安装（kali-rolling 包名漂移不影响镜像产出）——
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+      binwalk sasquatch squashfs-tools cpio mtools dosfstools \
+      foremost exiftool \
+    && apt-get install -y --no-install-recommends \
+      nmap sqlmap nikto gobuster ffuf whatweb dirb hydra medusa \
+    || true \
+    && apt-get install -y --no-install-recommends \
+      john hashcat netcat-openbsd socat tcpdump tshark dnsutils whois traceroute \
+    || true \
+    && apt-get install -y --no-install-recommends \
+      radare2 gdb strace ltrace \
+    || true \
+    && apt-get install -y --no-install-recommends \
+      python3-pwntools \
+    || true \
+    && rm -rf /var/lib/apt/lists/* /var/cache/apt/*
+
+# ropper：kali 无独立 apt 包且 pip 构建常缺环境，缺了不阻断（radare2/gdb 已覆盖二进制分析）
+RUN pip3 install --no-cache-dir --break-system-packages ropper 2>/dev/null || true
+
+# nmap 等二进制自带 file capabilities（cap_net_raw/cap_net_admin+eip）——平台沙箱
+# CapDrop ALL 下 exec 带 file-caps 的 ELF 会 EPERM（capability 超出 bounding set，
+# 实测 nmap exec 直接 Permission denied）。build 期移除：root 容器内 nmap 退化可用
+# （raw socket 扫描不可用，connect 扫描正常）。
+RUN apt-get update && apt-get install -y --no-install-recommends libcap2-bin \
+    && setcap -r /usr/lib/nmap/nmap 2>/dev/null || true \
+    && rm -rf /var/lib/apt/lists/* /var/cache/apt/*
+
+WORKDIR /workspace

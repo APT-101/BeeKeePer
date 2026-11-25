@@ -269,8 +269,16 @@ type Manager struct {
 	// task deletion. Spec assembly (workspace/skills binds) happens at the
 	// server layer, which owns the paths.
 	sandboxProv sandbox.Provider
-	sandboxMu   sync.Mutex
-	sandboxMap  map[string]sandbox.Sandbox
+	sandboxMu    sync.Mutex
+	sandboxImage string // ARTEX_SANDBOX_IMAGE：沙箱镜像名（空 = sandbox 包默认 artex-sandbox:latest）
+	sandboxMap   map[string]sandbox.Sandbox
+}
+
+// SetSandboxImage 配置沙箱镜像名（server 启动时读 ARTEX_SANDBOX_IMAGE，一次写入）。
+func (m *Manager) SetSandboxImage(img string) {
+	m.sandboxMu.Lock()
+	defer m.sandboxMu.Unlock()
+	m.sandboxImage = img
 }
 
 // SetSandboxProvider installs the execution sandbox provider (server startup).
@@ -297,6 +305,10 @@ func (m *Manager) FetchSandbox(ctx context.Context, taskID string, spec sandbox.
 	defer m.sandboxMu.Unlock()
 	if m.sandboxProv == nil {
 		return nil, nil
+	}
+	// 镜像配置注入：调用方未指定时用 ARTEX_SANDBOX_IMAGE（空 = sandbox 包默认值）。
+	if spec.Image == "" && m.sandboxImage != "" {
+		spec.Image = m.sandboxImage
 	}
 	if sb := m.sandboxMap[taskID]; sb != nil {
 		return sb, nil

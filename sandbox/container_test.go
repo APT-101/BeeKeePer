@@ -282,12 +282,31 @@ func TestBuildEgressEntryNoPortsAllowsAllPorts(t *testing.T) {
 	}
 }
 
+// 空白名单不再拒建容器（会堵死固件/离线审计的本地文件操作），改为生成
+// "全禁"entry：OUTPUT 全 DROP、零放行目标——网络层 fail-closed 语义保留，
+// 容器本身可用（实测任务 kali-sandbox-verify 因旧行为堵死全部沙箱命令）。
 func TestBuildEgressEntryEmptyDenied(t *testing.T) {
-	if _, err := buildEgressEntry([]roe.EgressRule{{Domains: []string{"definitely-not-a-real-host-xyz.invalid"}}}); err == nil {
-		t.Fatal("empty whitelist (all domains failed to resolve) must fail closed")
-	}
-	if _, err := buildEgressEntry([]roe.EgressRule{{}}); err == nil {
-		t.Fatal("no targets must fail closed")
+	for _, rules := range [][]roe.EgressRule{
+		{{Domains: []string{"definitely-not-a-real-host-xyz.invalid"}}},
+		{},
+	} {
+		script, err := buildEgressEntry(rules)
+		if err != nil {
+			t.Fatalf("empty whitelist must produce a deny-all entry, got error: %v", err)
+		}
+		if !strings.Contains(script, "iptables -P OUTPUT DROP") {
+			t.Errorf("deny-all entry must set OUTPUT policy DROP:\n%s", script)
+		}
+		// 除回环/已建立连接/DNS 之外，不得出现任何目标放行行
+		for _, line := range strings.Split(script, "\n") {
+			if strings.Contains(line, "-j ACCEPT") && !strings.Contains(line, "-o lo") &&
+				!strings.Contains(line, "conntrack") && !strings.Contains(line, "--dport 53") {
+				t.Errorf("deny-all entry must not allow any target, got line: %s", line)
+			}
+		}
+		if !strings.Contains(script, "exec sleep infinity") {
+			t.Errorf("deny-all entry must still keep the container alive:\n%s", script)
+		}
 	}
 }
 

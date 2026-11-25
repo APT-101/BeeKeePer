@@ -111,6 +111,10 @@ func (dockerCLI) Create(ctx context.Context, cfg ContainerConfig) (string, error
 	if cfg.Network != "" && cfg.Network != "egress" {
 		args = append(args, "--network", cfg.Network)
 	}
+	// entry 永远由平台决定：--entrypoint "" 清空基底镜像的 ENTRYPOINT（Kali
+	// 官方镜像自带 /bin/sh，不清空会变成 "/bin/sh sh -c …" 双 sh 而起不来），
+	// cfg.Entry 整体作为 CMD 执行。
+	args = append(args, "--entrypoint", "")
 	args = append(args, cfg.Image)
 	args = append(args, cfg.Entry...)
 	cmd := exec.CommandContext(ctx, "docker", args...)

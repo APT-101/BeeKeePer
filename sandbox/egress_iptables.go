@@ -59,7 +59,20 @@ func buildEgressEntry(rules []roe.EgressRule) (string, error) {
 	sort.Slice(ports, func(i, j int) bool { return ports[i] < ports[j] })
 
 	if len(ips)+len(cidrs) == 0 {
-		return "", fmt.Errorf("egress 白名单为空（域全部解析失败且无 IP/CIDR）")
+		// 空白名单 ≠ 拒建容器：固件/离线审计全程不需要出网，拒建会把本地文件
+		// 操作一并堵死。生成"全禁"entry——OUTPUT 全 DROP（仅回环/已建立连接/DNS
+		// 放行），网络层对全部目标 fail-closed，本地命令照常；命令层 guard 的
+		// 授权语义不变。此前"解析失败即拒建"在无站点任务（kali-sandbox-verify）
+		// 上实测堵死全部沙箱命令。
+		var b strings.Builder
+		b.WriteString("set -e\n")
+		b.WriteString("iptables -P OUTPUT DROP\n")
+		b.WriteString("iptables -A OUTPUT -o lo -j ACCEPT\n")
+		b.WriteString("iptables -A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT\n")
+		b.WriteString("iptables -A OUTPUT -p udp --dport 53 -j ACCEPT\n")
+		b.WriteString("iptables -A OUTPUT -p tcp --dport 53 -j ACCEPT\n")
+		b.WriteString("exec sleep infinity\n")
+		return b.String(), nil
 	}
 	if len(ports) > 0 && (len(ips)+len(cidrs))*len(ports)*2 > egressScriptMaxRules {
 		return "", fmt.Errorf("egress 白名单规则数超限")

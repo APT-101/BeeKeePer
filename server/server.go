@@ -189,6 +189,7 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string, keyDi
 	s.initSideQuestions()
 	// IoT 固件反编译作业队列（并发 1；无 DB/无 dataDir 时 decompile API 显式降级）。
 	s.decomp = newDecompiler(dataDir, m.pg)
+	s.decomp.start()
 	// M0 platform observability: one in-process bus + one metrics registry. The
 	// bus is strictly observational (publish is fire-and-forget), so wiring it
 	// cannot change any enforcement behavior.
@@ -278,6 +279,9 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string, keyDi
 				log.Printf("[sandbox] provider 装配失败(保持 off): %v", perr)
 			} else {
 				m.SetSandboxProvider(p)
+				if img := os.Getenv("ARTEX_SANDBOX_IMAGE"); img != "" {
+					m.SetSandboxImage(img)
+				}
 				if p.Type() == "container" {
 					bashRedirect = s.sandboxedBash
 					log.Printf("[sandbox] provider=container：Bash 将路由进沙箱容器（docker 不可用时 fail-closed）")
