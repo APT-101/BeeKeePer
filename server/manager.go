@@ -1529,6 +1529,20 @@ func (m *Manager) SetTaskStatusGuarded(id, status string) (won bool, err error) 
 	if err != nil || !won {
 		return won, err
 	}
+	// 组件收尾兜底（引擎级，done 专属）：prompt 层"组件收尾协议"只是劝说，
+	// 实测任务 306 仍有 14 个 pending 组件随 done 定格在组件页显示"待挖"。
+	// done 定格成功后把该任务仍为 pending 的组件整体转 ignored（notes 注明
+	// "收官自动忽略(未覆盖)"）；timeout 不走此处——异常终止保留 pending，
+	// 未完成状态对用户可见，可在组件页手动处理。
+	if status == "done" {
+		if cs := m.Components(); cs != nil {
+			if n2, cerr := cs.IgnorePendingForTask(n); cerr != nil {
+				log.Printf("[components] task %s done 兜底忽略 pending 组件失败: %v", id, cerr)
+			} else if n2 > 0 {
+				log.Printf("[components] task %s done 兜底：%d 个 pending 组件自动转 ignored", id, n2)
+			}
+		}
+	}
 	m.mu.Lock()
 	if t := m.tasks[id]; t != nil {
 		t.updateLifecycle(func(state *taskLifecycleState) {

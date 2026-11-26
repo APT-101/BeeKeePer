@@ -744,3 +744,20 @@ WHERE id = ANY($1::bigint[])`, ids, st)
 	}
 	return res.RowsAffected()
 }
+
+// IgnorePendingForTask 任务终态（done）兜底：把该任务范围内仍为 pending 的组件
+// 整体转 ignored，notes 追加"收官自动忽略(未覆盖)"。挂在 SetTaskStatusGuarded
+// 的 done 分支——planner prompt 层"组件收尾协议"（v1.0.2）只是劝说，实测任务
+// 306 仍有 14 个 pending 随 done 定格；本兜底保证任务不再带着"待挖"定格。
+// timeout 不走此处：异常终止保留 pending 让用户看到未完成的真实状态，可在
+// 组件页手动处理。返回转换条数。
+func (s *ComponentStore) IgnorePendingForTask(taskID int64) (int64, error) {
+	tag, err := s.q().Exec(`UPDATE components SET status='ignored', updated_at=now(),
+  notes = CASE WHEN coalesce(notes,'')='' THEN '收官自动忽略(未覆盖)'
+               ELSE notes || '；收官自动忽略(未覆盖)' END
+ WHERE status='pending' AND $1 = ANY(task_ids)`, taskID)
+	if err != nil {
+		return 0, err
+	}
+	return tag.RowsAffected()
+}
