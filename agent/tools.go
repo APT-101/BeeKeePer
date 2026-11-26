@@ -78,6 +78,7 @@ type ToolSet struct {
 	cs              *db.CompanyStore // company store (optional)
 	comp            *db.ComponentStore     // 固件组件 store（可选；nil = IoT 组件工具不可用）
 	fwx             *db.FirmwareExtractStore // 固件解包登记 store（可选；与 comp 同进退）
+	mobsfScanFn     func(taskID int64, relPath string) (map[string]any, error) // MobSF 静态扫描（server 注入；nil = 未 wire，工具报未启用）
 	ts              *db.ExplorationStore
 	worker          string
 	taskID          int64 // PG tasks.id; 0 when unknown (tests / orchestrator cross-task reads)
@@ -186,6 +187,13 @@ func (t *ToolSet) Writes() WriteCounts { return t.writes }
 
 func NewToolSet(ts *db.ExplorationStore, worker string) *ToolSet {
 	return &ToolSet{ts: ts, worker: worker}
+}
+
+// SetMobsfScan 注入 MobSF 静态扫描函数（server 的 runMobsfScan；nil = MobSF
+// 未配置或未 wire，mobsf_scan 工具报"未启用"）。签名刻意不引用 server 包，
+// 避免 agent → server 的反向依赖。
+func (t *ToolSet) SetMobsfScan(fn func(taskID int64, relPath string) (map[string]any, error)) {
+	t.mobsfScanFn = fn
 }
 
 // SetTaskID sets the PG task id on this ToolSet so that report_finding can

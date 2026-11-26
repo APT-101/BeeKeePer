@@ -490,6 +490,21 @@ func (s *Server) buildPlannerWorker(pinID *int64, gProv llm.Provider, gCfg agent
 	wProv, wCfg := s.providerForAgent("worker", pinID, gProv, gCfg)
 	wk := agent.NewWorker(wProv, wCfg.Model, s.m.dir, tx, wCfg.CompactionWindow(), s.agentMaxTurns("worker"))
 	wk.SetFindingRecorder(s.evidenceStore())
+	// MobSF 静态扫描接线：settings 配置了 MobSF API 时 worker 的 mobsf_scan
+	// 工具可用；未配置则闭包返回"未配置"提示（工具仍挂载，语义清晰）。
+	{
+		scanFn := func(taskID int64, relPath string) (map[string]any, error) {
+			id := strconv.FormatInt(taskID, 10)
+			t, ok := s.m.Task(id)
+			if !ok {
+				return nil, fmt.Errorf("task #%d 不存在", taskID)
+			}
+			// ctx 用 Background：工具调用没有请求生命周期，超时由
+			// runMobsfScan 内部的 mobsfScanTimeout 自管。
+			return s.runMobsfScan(context.Background(), t, relPath)
+		}
+		wk.SetMobsfScan(scanFn)
+	}
 	wk.SetRunTimeout(time.Duration(s.agentRunSeconds("worker")) * time.Second)
 	wk.SetProxy(s.m.ProxyAddr(), s.m.ProxyCACert())
 	wk.SetWebSearch(s.webSearchFor("worker"))
@@ -996,6 +1011,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/report", s.getReport)
 	mux.HandleFunc("POST /api/chat", s.chat)
 	mux.HandleFunc("POST /api/chat/upload", s.chatUpload) // 方式1 文件上传:落到会话/任务工作目录 uploads/
+	mux.HandleFunc("/api/mobsf/config", s.mobsfConfigHTTP) // MobSF 静态引擎接入配置（GET 读/POST 写）
+	mux.HandleFunc("POST /api/tasks/{id}/mobsf/scan", s.mobsfScanHTTP) // MobSF 静态扫描（GUI/调试用；agent 走 mobsf_scan 工具）
 	mux.HandleFunc("GET /api/tasks/{id}/chat/status", s.taskChatStatus)
 	mux.HandleFunc("POST /api/tasks/{id}/chat/stop", s.stopChat)
 

@@ -624,3 +624,46 @@ func sha256File(p string) (string, error) {
 	}
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
+
+// mobsfScan 把任务目录内的 APK/IPA/固件包交给 MobSF 静态引擎（REST API）做
+// 全量静态扫描。server 通过 SetMobsfScan 注入实现（nil = 未配置/未 wire）；
+// 上传与报告轮询由 server 直连 MobSF 完成，不经沙箱（与 IDA 反编译链同模式）。
+// 返回摘要（app 包名/版本、manifest 与代码分析计数、报告 JSON 落盘路径），
+// agent 据此用 insert_finding / insert_components 登记结构化结果。
+func (t *ToolSet) mobsfScan() actool.CoreTool {
+	return writeTool(
+		"mobsf_scan",
+		"把本任务目录内的 APK/IPA/固件包交给 MobSF 静态引擎做全量静态扫描（上传→等待扫描→取完整报告）。\n"+
+			"path：目标文件相对任务目录的路径（例如 uploads/app.apk 或 firmware/app.apk）。\n"+
+			"返回：{hash, report_path(报告 JSON 落盘路径), summary:{app_name, package_name, version_name, "+
+			"manifest_findings, permissions_count, android_api_hits, hardcoded_secrets, report_sections}}。\n"+
+			"扫描完成后：manifest 分析里的导出组件用 insert_components 登记（firmware_sha256 填本任务的包 sha），"+
+			"代码分析高危条目用 insert_finding 落 finding，完整报告 JSON 可用 Read 直接读取。",
+		obj(map[string]any{
+			"path": str("目标文件相对任务目录的路径（uploads/app.apk、firmware/app.ipa 等）"),
+		}, "path"),
+		func(_ context.Context, in json.RawMessage) (actool.Result, error) {
+			var a struct {
+				Path string `json:"path"`
+			}
+			if err := json.Unmarshal(in, &a); err != nil {
+				return actool.Errorf(err.Error()), nil
+			}
+			if t.mobsfScanFn == nil {
+				return actool.Errorf("mobsf_scan 未启用：系统设置页未配置 MobSF API 地址与 key，或本运行未接线"), nil
+			}
+			if t.taskID <= 0 {
+				return actool.Errorf("mobsf_scan 需要任务上下文"), nil
+			}
+			raw := strings.TrimSpace(a.Path)
+			if raw == "" {
+				return actool.Errorf("path 不能为空：填目标文件相对任务目录的路径"), nil
+			}
+			res, err := t.mobsfScanFn(t.taskID, raw)
+			if err != nil {
+				return actool.Errorf(err.Error()), nil
+			}
+			return jsonResult(res)
+		},
+	)
+}

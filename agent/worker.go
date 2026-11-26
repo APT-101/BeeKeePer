@@ -53,6 +53,9 @@ type WebSearchOpts struct {
 
 type Worker struct {
 	findingRecorder FindingRecorder
+	// mobsfScan 是 server 注入的 MobSF 静态扫描函数（nil = 未配置/未 wire），
+	// execute 时转发给 ToolSet 供 mobsf_scan 工具调用。
+	mobsfScan     func(taskID int64, relPath string) (map[string]any, error)
 	prov            llm.Provider
 	model           string
 	workDir         string
@@ -126,6 +129,12 @@ func (w *Worker) SetNoaEnabled(fn func() bool) { w.noaEnabledFn = fn }
 // SetMaxTokens wires a resolver for the per-reply output cap. nil/unset or 0 =
 // send no cap and let the endpoint decide. Read per run, like nonStreaming.
 func (w *Worker) SetMaxTokens(fn func() int) { w.maxTokensFn = fn }
+
+// SetMobsfScan 注入 MobSF 静态扫描函数（server 的 runMobsfScan）；execute 时
+// 转发给 ToolSet 供 mobsf_scan 工具调用。nil = MobSF 未配置，工具报"未启用"。
+func (w *Worker) SetMobsfScan(fn func(taskID int64, relPath string) (map[string]any, error)) {
+	w.mobsfScan = fn
+}
 
 func (w *Worker) maxTokens() int {
 	if w.maxTokensFn == nil {
@@ -362,6 +371,7 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 	tsx := NewToolSet(ts, name)
 	tsx.SetFindingRecorder(w.findingRecorder)
 	tsx.SetTaskID(taskID)
+	tsx.SetMobsfScan(w.mobsfScan)
 	coverageEnabled := as == nil || as.CoverageEnabled(taskID)
 	tsx.SetCoverageEnabled(coverageEnabled)
 	if as != nil {

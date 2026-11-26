@@ -614,7 +614,7 @@ func (t *ToolSet) WorkerTools() []actool.CoreTool {
 		t.insertAssets(), t.listAssets(),
 		// IoT 固件组件（handlers guard nil store internally）：
 		// register_extract 只给 worker —— 解包是 worker 的活，解完登记，后续意图复用。
-		t.insertComponents(), t.listComponents(), t.registerExtract(),
+		t.insertComponents(), t.listComponents(), t.registerExtract(), t.mobsfScan(),
 		// 跨 work 回看：worker 也可复用其他 work 的观察，避免重复劳动。
 		// search_all_worker_traces：不必先知道 intent_id，按关键字全局捞命中步骤；
 		// get_worker_trace：锁定某条 work 后列步骤/就地搜/取完整内容。
@@ -641,7 +641,7 @@ func (t *ToolSet) MainAgentTools() []actool.CoreTool {
 		// asset management (handlers guard nil store internally)
 		t.insertAssets(), t.addCompanyScope(), t.listAssets(),
 		// IoT 固件组件（handlers guard nil store internally）
-		t.insertComponents(), t.listComponents(), t.setComponentStatus(), t.registerExtract(),
+		t.insertComponents(), t.listComponents(), t.setComponentStatus(), t.registerExtract(), t.mobsfScan(),
 		t.addFinding(), t.recordFact(),
 		t.addTaskScope(),
 		// list_untested_assets：按需查本任务范围内未测资产(类型+分页)，自行决定补测。
