@@ -151,17 +151,24 @@ func (s *Server) runMobsfScan(ctx context.Context, t *Task, relPath string) (map
 	}
 
 	// ② report_json（同步扫描已完成；失败时轮询重试几次）
+	// 端点/方法实测校准（MobSF v3.4.5）：POST /api/v1/report_json，
+	// hash 走 form body；GET /api/v1/scan_pdf/report_json 在该版本不存在。
+	// 轮询窗口 30×10s=5 分钟：MobSF upload 返回 hash 后静态分析异步进行
+	// （实测任务 ovaa 5.5MB 扫描约 4-8 分钟），report 未就绪时返回
+	// {"report":"Report not Found"} 404——轮询直到报告出现。
 	var report map[string]any
 	var lastErr error
-	for attempt := 0; attempt < 6; attempt++ {
+	for attempt := 0; attempt < 30; attempt++ {
 		if attempt > 0 {
-			if sleepCtx(ctx, mobsfPollInterval) {
+			if sleepCtx(ctx, mobsfPollInterval*2) {
 				return nil, fmt.Errorf("cancelled")
 			}
 		}
-		repReq, _ := http.NewRequestWithContext(ctx, http.MethodGet,
-			baseURL+"/api/v1/scan_pdf/report_json?hash="+hash, nil)
+		repReq, _ := http.NewRequestWithContext(ctx, http.MethodPost,
+			baseURL+"/api/v1/report_json",
+			strings.NewReader("hash="+hash))
 		repReq.Header.Set("Authorization", apiKey)
+		repReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		res, err := http.DefaultClient.Do(repReq)
 		if err != nil {
 			lastErr = err
@@ -237,6 +244,34 @@ func mobsfSummary(report map[string]any) map[string]any {
 	}
 	out["report_sections"] = keys
 	return out
+}
+
+// POST /api/mobsf/test —— 设置页"测试连接"：探 MobSF /api/v1/scans
+// （GET 200=连通且 key 有效；401=key 错误；其它/超时=不可达）。
+func (s *Server) mobsfTestHTTP(w http.ResponseWriter, r *http.Request) {
+	baseURL, apiKey, ok := s.m.mobsfConfig()
+	if !ok {
+		writeJSON(w, 200, map[string]any{"ok": false, "reason": "未配置（先填写 API 地址与 key 并保存）"})
+		return
+	}
+	req, _ := http.NewRequestWithContext(r.Context(), http.MethodGet,
+		baseURL+"/api/v1/scans", nil)
+	req.Header.Set("Authorization", apiKey)
+	client := &http.Client{Timeout: 10 * time.Second}
+	res, err := client.Do(req)
+	if err != nil {
+		writeJSON(w, 200, map[string]any{"ok": false, "reason": "不可达: " + err.Error()})
+		return
+	}
+	defer res.Body.Close()
+	switch res.StatusCode {
+	case 200:
+		writeJSON(w, 200, map[string]any{"ok": true, "reason": "连通且 key 有效"})
+	case 401:
+		writeJSON(w, 200, map[string]any{"ok": false, "reason": "API key 无效或已变更"})
+	default:
+		writeJSON(w, 200, map[string]any{"ok": false, "reason": fmt.Sprintf("HTTP %d", res.StatusCode)})
+	}
 }
 
 // POST /api/tasks/{id}/mobsf/scan  body {"path": "uploads/xxx.apk"}
