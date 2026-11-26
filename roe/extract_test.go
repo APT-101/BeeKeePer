@@ -71,3 +71,37 @@ func TestExtractTargetsNonNetwork(t *testing.T) {
 		t.Errorf("non-string input must be ignored, got %v", got)
 	}
 }
+
+// 任务 306 实测回归：python 密码分析命令的本地文件名 / import 路径被 hostLike
+// 当成域名（Config.xml 被拦 7 次、xml.etree.ElementTree、cryptography.hazmat…），
+// 非网络工具（python/gcc）的位置参数不再提取，文件扩展名 token 一律排除。
+func TestExtractTargetsLocalFilesNotTargets(t *testing.T) {
+	cases := []string{
+		`{"command":"cd /workspace/firmware && python3 -c 'import xml.etree.ElementTree as ET; ET.parse(\"Config.xml\")'"}`,
+		`{"command":"python3 analyze2.py Config.xml 4C.dat"}`,
+		`{"command":"cd /workspace/firmware/DATA_MCTRL4K_V1.3.0.0.STD && gcc -o analyze analyze2.c -lcrypto"}`,
+		`{"command":"xxd 8028.dat | head -20"}`,
+		`{"command":"cp t.txt /tmp/t.txt && wc -l analyze2.py"}`,
+	}
+	for i, raw := range cases {
+		if got := ExtractTargets("Bash", json.RawMessage(raw)); got != nil {
+			t.Errorf("case %d local filenames must not be targets, got %v", i, got)
+		}
+	}
+}
+
+// 网络工具命令的目标提取不受影响（回归保障）。
+func TestExtractTargetsNetToolsStillWork(t *testing.T) {
+	got := ExtractTargets("Bash", json.RawMessage(`{"command":"nmap -Pn -p 8787 192.168.8.192"}`))
+	if !reflect.DeepEqual(got, []string{"192.168.8.192"}) {
+		t.Errorf("nmap target = %v", got)
+	}
+	got = ExtractTargets("Bash", json.RawMessage(`{"command":"curl -sS -m 5 http://192.168.8.192:8787/api/health"}`))
+	if !reflect.DeepEqual(got, []string{"192.168.8.192:8787"}) {
+		t.Errorf("curl target = %v", got)
+	}
+	got = ExtractTargets("Bash", json.RawMessage(`{"command":"ssh admin@10.0.0.5"}`))
+	if !reflect.DeepEqual(got, []string{"10.0.0.5"}) {
+		t.Errorf("ssh target = %v", got)
+	}
+}

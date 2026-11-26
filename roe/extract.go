@@ -14,7 +14,20 @@ var reURL = regexp.MustCompile(`(?i)\b(?:https?|ftp)://([^/\s"'<>]+)`)
 // 避免把 `-c 3`、`dig +short` 之类的选项参数误当成网络目标。
 var reHostLike = regexp.MustCompile(`^(?:(?:[a-zA-Z0-9_](?:[a-zA-Z0-9_-]*[a-zA-Z0-9_])?\.)+(?:[a-zA-Z]{2,}|[0-9]{1,3})|\d{1,3}(?:\.\d{1,3}){3}|[0-9a-fA-F]*:[0-9a-fA-F:]+)(?::\d{1,5})?$`)
 
+// reFileExt 常见文件扩展名——它们形似 TLD 但不是（实测任务 306：Config.xml
+// 被拦 7 次、8028.dat、analyze2.py、t.txt……全是本地文件名）。hostLike 对
+// "xxx.xml" 这类 token 无法与域名区分，这里显式排除；真域名不会以这些后缀
+// 结尾（.xml/.py 等不在 IANA TLD 列表）。
+var reFileExt = regexp.MustCompile(`(?i)\.(xml|json|py|dat|txt|log|bin|md|conf|cfg|yaml|yml|sh|html|js|css|csv|pcap|pyc|go|rs|ts|tsx|jsx|ini|toml|bak|tmp|out|err|tar|gz|bz2|xz|zip|7z|rar|img|iso|fw|pak|rom|cap|ubi|swu|dfu|enc|std|doc|pdf|xls)$`)
+
+// reCurl：curl/wget —— 它们的位置参数几乎必是 URL/主机，全 token 扫描。
 var reCurl = regexp.MustCompile(`(?:^|\s)(?:curl|wget)\b`)
+
+// reNetTool 已知网络工具：第 3 类（非 curl 命令）只对含这些工具的命令做位置
+// 参数提取。此前对任意命令全 token 扫描，python/gcc/xxd 的参数（文件名、
+// import 路径）大量误入——实测任务 306：python 密码分析被拦 4 次全是
+// Config.xml / xml.etree.ElementTree / cryptography.hazmat... 这类误报。
+var reNetTool = regexp.MustCompile(`(?i)(?:^|\s)(nmap|dig|nslookup|host|ssh|scp|sftp|nc|netcat|ping|ping6|traceroute|tracepath|whois|ftp|telnet|openssl|ncat)\b`)
 
 // ExtractTargets pulls explicit network targets out of a tool call's input.
 // tool ∈ Bash | shell_send | shell_open parses the command text; WebFetch /
@@ -72,6 +85,11 @@ func ExtractTargets(tool string, input json.RawMessage) []string {
 		if s == "" {
 			return
 		}
+		// 常见文件扩展名不是 TLD——本地文件名（Config.xml / analyze2.py…）
+		// 在这里排除，避免被 hostLike 当成域名拦下。
+		if reFileExt.MatchString(s) {
+			return
+		}
 		if !reHostLike.MatchString(s) {
 			return
 		}
@@ -93,18 +111,22 @@ func ExtractTargets(tool string, input json.RawMessage) []string {
 		}
 		return out
 	}
-	// 3) 其它网络工具：第一个主机型位置参数（预筛同样剥 userinfo）
-	for _, tok := range strings.Fields(raw) {
-		if strings.HasPrefix(tok, "-") || strings.HasPrefix(tok, "+") {
-			continue
-		}
-		h := strings.Trim(tok, `"'`)
-		if i := strings.LastIndex(h, "@"); i >= 0 && !strings.Contains(h[:i], "/") {
-			h = h[i+1:]
-		}
-		if reHostLike.MatchString(h) {
-			add(h)
-			break
+	// 3) 其它已知网络工具：只有命令里出现网络工具时才扫主机型位置参数——
+	//    python/gcc/xxd 等非网络工具的参数（文件名、import 路径）不再是目标
+	//    （实测任务 306：python 密码分析被拦 4 次全为文件名/import 误报）。
+	if reNetTool.MatchString(raw) {
+		for _, tok := range strings.Fields(raw) {
+			if strings.HasPrefix(tok, "-") || strings.HasPrefix(tok, "+") {
+				continue
+			}
+			h := strings.Trim(tok, `"'`)
+			if i := strings.LastIndex(h, "@"); i >= 0 && !strings.Contains(h[:i], "/") {
+				h = h[i+1:]
+			}
+			if reHostLike.MatchString(h) {
+				add(h)
+				break
+			}
 		}
 	}
 	return out
