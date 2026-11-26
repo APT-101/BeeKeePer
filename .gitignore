@@ -24,8 +24,9 @@ web/next-env.d.ts
 *.swp
 *.swo
 
-# docs
-/docs/
+# docs（本地目录默认忽略；正式架构文档以 ! 例外放行）
+/docs/**
+!/docs/mobile-architecture.md
 
 # os
 .DS_Store
@@ -34,10 +35,8 @@ Thumbs.db
 # claude code local state
 .claude/
 
-# 内嵌前端的单二进制产物
-/artex
-# 一键更新在可执行文件旁留下的中间产物（暂存件 / 备份 / 失败版本 / 升级标记）
-/artex.new
+# 閸愬懎绁甸崜宥囶伂閻ㄥ嫬宕熸禍宀冪箻閸掓湹楠囬悧?/artex
+# 娑撯偓闁款喗娲块弬鏉挎躬閸欘垱澧界悰灞炬瀮娴犺埖姊洪悾娆庣瑓閻ㄥ嫪鑵戦梻缈犻獓閻椻晪绱欓弳鍌氱摠娴?/ 婢跺洣鍞?/ 婢惰精瑙﹂悧鍫熸拱 / 閸楀洨楠囬弽鍥唶閿?/artex.new
 /artex.new.sha256
 /artex.old
 /artex.failed
@@ -45,18 +44,16 @@ Thumbs.db
 /server/webui/dist/
 /dist/
 
-# JWT 签名密钥（运行时生成，存项目根，绝不提交）
-/jwt.key
+# JWT 缁涙儳鎮曠€靛棝鎸滈敍鍫ｇ箥鐞涘本妞傞悽鐔稿灇閿涘苯鐡ㄦい鍦窗閺嶇櫢绱濈紒婵呯瑝閹绘劒姘﹂敍?/jwt.key
 
-# Docker 部署生成的本地环境（含密码/密钥，不提交）
-.env
+# Docker 闁劎璁查悽鐔稿灇閻ㄥ嫭婀伴崷鎵箚婢у喛绱欓崥顐㈢槕閻?鐎靛棝鎸滈敍灞肩瑝閹绘劒姘﹂敍?.env
 
-# 调度器运行/模拟产生的事件日志（测试产物，不提交）
-*-events.csv
+# 鐠嬪啫瀹抽崳銊ㄧ箥鐞?濡剝瀚欐禍褏鏁撻惃鍕皑娴犺埖妫╄箛妤嬬礄濞村鐦禍褏澧块敍灞肩瑝閹绘劒姘﹂敍?*-events.csv
 
-# bench 基准测试相关（本地产物，不提交）
+# bench 閸╁搫鍣ù瀣槸閻╃鍙ч敍鍫熸拱閸﹂楠囬悧鈺嬬礉娑撳秵褰佹禍銈忕礆
 /bench/
 /Dockerfile.bench
 /Dockerfile.bench.v2
 # local Go toolchain/module cache (DSH sandbox workaround)
 .go/
+
