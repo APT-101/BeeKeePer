@@ -375,13 +375,19 @@ GET /api/llm/pool   # 查看 chain 与各 profile 健康状态（fails/trips/coo
 ```
 BEEKEEPER 服务端（Linux 容器沙箱）
   ├─ Web / 代码审计 / 固件静态         ← 现有容器链路（fail-closed）
+  ├─ 移动静态                          ← MobSF 静态引擎进 Kali 沙箱（jadx/apktool/mobsfscan）
   │
-[执行通道：控制面在服务端，动作面在 Windows 主机]
+[执行通道：控制面在服务端，动作面在设备/主机]
   ├─ PC 程序       本机安装路径 → DSH 主机本机评估
-  ├─ Android       本地模拟器 + adb 连接方式 → DSH 主机桥接操作
+  ├─ 移动动态      设备池（emulator / adb / bridge 三种 provider）
+  │                Android：模拟器实例池（快照复位）+ DroidBridge 反连（Sentinel 架构）；真机 root 增强
+  │                iOS：越狱真机 + SentinelBridge（wss 反连 + 证书指纹 pin + 砸壳）——模拟器不可替代
+  │                静动接力：静态发现 → planner 动态验证意图；iOS 砸壳 dump → 静态引擎输入
   ├─ 固件动态      （需 ARM 主机，未排期）
-  └─ iOS           （未涉及）
+  └─ iOS 静态      依赖砸壳 dump（由动态侧 SentinelBridge 产出）
 ```
+
+移动端架构详见 [docs/mobile-architecture.md](docs/mobile-architecture.md)（双轨设计、设备池三分 provider、静动接力、分期实施）。
 
 ### 能力矩阵（首期 / 进阶）
 
@@ -389,8 +395,10 @@ BEEKEEPER 服务端（Linux 容器沙箱）
 |---|---|---|
 | Web | ✅ 现有容器沙箱全链路 | — |
 | **PC 程序** | DSH 主机本机评估：进程/文件/注册表/服务/网络行为/畸形输入（只读红线） | — |
-| **Android** | 模拟器 + adb：安装/启动/遍历/dumpsys/logcat/抓包 | frida hook、脱壳 |
-| **iOS** | 未涉及 | 未涉及 |
+| **Android 静态** | MobSF 静态引擎进 Kali 沙箱：jadx/apktool 反编译、manifest 分析、mobsfscan（SARIF→finding）、组件登记 | — |
+| **Android 动态** | 模拟器实例池（快照复位）+ DroidBridge 反连（Sentinel 架构）：exec/logcat/截屏/流量捕获→MITM/TCP 隧道 | 真机 root（frida hook、脱壳）、反检测对抗 |
+| **iOS 静态** | 依赖砸壳 dump（动态侧产出）→ MobSF 静态引擎 | — |
+| **iOS 动态** | 越狱真机 + SentinelBridge 反连（wss + 证书指纹 pin）：exec/砸壳/tcpdump/TCP 隧道/frida | rootful 形态、roothide |
 | **固件** | ✅ **已落地**：全链路审计（上传→解包登记→组件状态机→IDA 无头反编译→发现落库） | 需 ARM 主机动态运行 |
 | **代码审计** | git + SAST/SCA/Secret + code_verify 静态动态闭环 | — |
 | **AI 原生应用** | 集成 [Tencent AI-Infra-Guard](https://github.com/Tencent/AI-Infra-Guard)（外挂引擎）：Agent/Skills/MCP/Infra Scan + LLM Jailbreak Eval | — |
