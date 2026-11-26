@@ -591,6 +591,19 @@ func (s *Server) applyLLM(cfg agent.Config) error {
 	mProv, mCfg := s.providerForAgent("mainagent", nil, prov, cfg)
 	s.cfgMu.Lock()
 	s.mainAgent = agent.NewMainAgent(mProv, mCfg.Model, s.m.dir, tx, mCfg.CompactionWindow(), s.agentMaxTurns("mainagent"))
+	// MobSF 静态扫描接线（无任务上下文的对话场景）：mobsf_scan 工具带
+	// taskID>0 才可用（工具侧 guard），闭包按传入 taskID 解析任务。
+	{
+		scanFn := func(taskID int64, relPath string) (map[string]any, error) {
+			id := strconv.FormatInt(taskID, 10)
+			t, ok := s.m.Task(id)
+			if !ok {
+				return nil, fmt.Errorf("task #%d 不存在", taskID)
+			}
+			return s.runMobsfScan(context.Background(), t, relPath)
+		}
+		s.mainAgent.SetMobsfScan(scanFn)
+	}
 	s.mainAgent.SetFindingRecorder(s.evidenceStore())
 	s.mainAgent.SetProxy(s.m.ProxyAddr(), s.m.ProxyCACert()) // WebFetch through the recording proxy
 	s.mainAgent.SetWebSearch(s.webSearchFor("mainagent"))

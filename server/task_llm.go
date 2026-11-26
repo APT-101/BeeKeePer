@@ -584,6 +584,22 @@ func (s *Server) agentsForTask(t *Task) *taskAgentBundle {
 	pl.SetConstraintInject(s.constraintInjectPlanner) // 操作约束注入 planner(可配置,默认开)
 	main := agent.NewMainAgent(mainRuntime, "task-router", s.m.dir, tx, mainRuntime.CompactionWindow(), s.agentMaxTurns("mainagent"))
 	main.SetFindingRecorder(s.evidenceStore())
+	// MobSF 静态扫描接线：chat 场景的 mobsf_scan 工具走这里（agentsForTask 的
+	// main agent），与 worker 的 wire 同款——闭包解析 Task 对象后调 runMobsfScan。
+	{
+		tt := t
+		main.SetMobsfScan(func(taskID int64, relPath string) (map[string]any, error) {
+			target := tt
+			if strconv.FormatInt(taskID, 10) != tt.ID {
+				other, ok := s.m.Task(strconv.FormatInt(taskID, 10))
+				if !ok {
+					return nil, fmt.Errorf("task #%d 不存在", taskID)
+				}
+				target = other
+			}
+			return s.runMobsfScan(context.Background(), target, relPath)
+		})
+	}
 	main.SetCompactionWindowResolver(mainRuntime.CompactionWindow)
 	main.SetNonStreaming(mainRuntime.nonStreaming)
 	main.SetMaxTokens(mainRuntime.maxTokens)
