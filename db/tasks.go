@@ -498,6 +498,16 @@ UPDATE tasks
 	return n > 0, nil
 }
 
+// SetTaskDescription rewrites the description after staging-attachment migration:
+// drafts/<draftID>/uploads absolute paths in the pre-creation description point at
+// files that were MOVED into tasks/<id>/uploads/ — the stored description must
+// follow, or the agent reads dead paths (task 306: firmware sat in drafts the
+// whole run while the agent probed for it).
+func (d *DB) SetTaskDescription(id int64, description string) error {
+	_, err := d.Exec(`UPDATE tasks SET description=$2 WHERE id=$1`, description, id)
+	return err
+}
+
 // StampFirstRun records a task's first-real-run moment and computes its absolute
 // deadline (= now + timeoutSeconds). Idempotent: only stamps when first_run_at is
 // still NULL, so restarts / re-entries keep the original clock. timeoutSeconds<=0
