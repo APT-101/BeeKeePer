@@ -150,7 +150,36 @@ func (s *Server) runMobsfScan(ctx context.Context, t *Task, relPath string) (map
 		return nil, fmt.Errorf("MobSF 扫描失败: %s", up.Error)
 	}
 
-	// ② report_json（同步扫描已完成；失败时轮询重试几次）
+	// ② 触发静态分析（MobSF 4.x 语义：upload 只入库不扫描，/api/v1/scan 才
+	// 触发——form body hash + re_scan，同步阻塞至分析完成返回摘要。
+	// 缺失此步是此前 report_json 永远 404 "Report not Found" 的根因
+	// （MobSF 4.6.9 实测：upload 后 SCAN_LOGS 恒空、PENDING 永挂）。
+	// re_scan=1 允许对已入库文件强制重扫；首次扫描用 0 即可。
+	scanReq, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		baseURL+"/api/v1/scan",
+		strings.NewReader("hash="+hash+"&re_scan=0"))
+	if err != nil {
+		return nil, err
+	}
+	scanReq.Header.Set("Authorization", apiKey)
+	scanReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	sctx, scancel := context.WithTimeout(ctx, mobsfScanTimeout)
+	defer scancel()
+	scanReq = scanReq.WithContext(sctx)
+	{
+		res, err := http.DefaultClient.Do(scanReq)
+		if err != nil {
+			return nil, fmt.Errorf("MobSF 扫描触发失败: %v", err)
+		}
+		defer res.Body.Close()
+		raw, _ := io.ReadAll(io.LimitReader(res.Body, mobsfReportMaxBytes))
+		if res.StatusCode != 200 {
+			return nil, fmt.Errorf("MobSF 扫描被拒（HTTP %d）: %s", res.StatusCode, strings.TrimSpace(string(raw)))
+		}
+		// 200 = 同步扫描完成（响应体为静态分析摘要：act_count/api 等）
+	}
+
+	// ③ report_json（扫描已完成，正常一次即中；保留短轮询兜底时序）
 	// 端点/方法实测校准（MobSF v3.4.5）：POST /api/v1/report_json，
 	// hash 走 form body；GET /api/v1/scan_pdf/report_json 在该版本不存在。
 	// 轮询窗口 30×10s=5 分钟：MobSF upload 返回 hash 后静态分析异步进行
