@@ -14,7 +14,7 @@ import (
 )
 
 // maxChatUpload caps a single chat-attachment upload request (memory + spill).
-const maxChatUpload = 128 << 20 // 128 MiB
+const maxChatUpload = 512 << 20 // 512 MiB（大 APK/固件包前台直传；MobSF 上传上限 1GB，此处对齐到一半）
 
 // safeChatID guards the {id} path segment against traversal — task ids are numeric,
 // session ids are alnum/_/- ; anything with "/" or ".." is rejected.
