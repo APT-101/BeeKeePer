@@ -44,6 +44,7 @@ import { CoverageGraphTab } from "./_tabs/coverage-graph-tab";
 import { FindingsTab } from "./_tabs/findings-tab";
 import { GraphTab } from "./_tabs/graph-tab";
 import { InterceptTab } from "./_tabs/intercept-tab";
+import { MobsfReportTab } from "./_tabs/mobsf-tab";
 import { ComponentsTab } from "./_tabs/components-tab";
 import { DecompileTab } from "./_tabs/decompile-tab";
 import { OverviewTab } from "./_tabs/overview-tab";
@@ -63,6 +64,7 @@ const TABS = [
   { value: "coverage", label: "资产覆盖图" },
   { value: "intercept", label: "拦截审批" },
   { value: "report", label: "报告" },
+  { value: "mobsf", label: "MobSF 报告" },
 ];
 
 function taskProfileIDs(task: Task): string[] {
@@ -451,6 +453,9 @@ function TaskDetailInner() {
         </TabsContent>
         <TabsContent value="report" className="mt-0">
           <ReportTab taskId={id} />
+        </TabsContent>
+        <TabsContent value="mobsf" className="mt-0">
+          <MobsfReportTab taskId={id} />
         </TabsContent>
       </div>
     </Tabs>

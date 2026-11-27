@@ -22,6 +22,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 )
@@ -327,4 +328,118 @@ func (s *Server) mobsfScanHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, res)
+}
+
+// GET /api/tasks/{id}/mobsf/report —— MobSF 报告 GUI 视图（裁剪版）。
+// 报告 JSON 可能非常大（ViPlexHandy 19.6MB），全量直传前端不可行：
+// 返回应用信息 + 全章节名/条目数 + 关键章节（manifest/code/binary/secrets）
+// 的裁剪条目，前端按章节折叠展示。
+func (s *Server) mobsfReportViewHTTP(w http.ResponseWriter, r *http.Request) {
+	t, ok := s.m.Task(r.PathValue("id"))
+	if !ok {
+		writeErr(w, http.StatusNotFound, "task not found")
+		return
+	}
+	dir := filepath.Join(s.m.dir, "tasks", t.ID, "mobsf")
+	entries, err := os.ReadDir(dir)
+	if err != nil || len(entries) == 0 {
+		writeErr(w, 404, "任务尚无 MobSF 报告（先发起静态扫描）")
+		return
+	}
+	// 取最新一份报告（按修改时间）
+	var latest string
+	var latestMod time.Time
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+			continue
+		}
+		info, err := e.Info()
+		if err == nil && info.ModTime().After(latestMod) {
+			latest, latestMod = filepath.Join(dir, e.Name()), info.ModTime()
+		}
+	}
+	if latest == "" {
+		writeErr(w, 404, "任务尚无 MobSF 报告文件")
+		return
+	}
+	raw, err := os.ReadFile(latest)
+	if err != nil {
+		writeErr(w, 500, "读取报告失败: "+err.Error())
+		return
+	}
+	if len(raw) > mobsfReportMaxBytes {
+		writeErr(w, 500, "报告超过展示上限")
+		return
+	}
+	var rep map[string]any
+	if err := json.Unmarshal(raw, &rep); err != nil {
+		writeErr(w, 500, "报告解析失败: "+err.Error())
+		return
+	}
+	app := map[string]any{}
+	for _, k := range []string{"app_name", "package_name", "version_name", "file_name", "size", "md5", "sha256", "min_sdk", "target_sdk", "max_sdk", "main_activity", "app_type"} {
+		if v, ok2 := rep[k]; ok2 {
+			app[k] = v
+		}
+	}
+	app["hash"] = strings.TrimSuffix(filepath.Base(latest), ".json")
+
+	// 全章节名 + 条目数（数组取 len，标量记作 1）
+	type secInfo struct {
+		Name  string `json:"name"`
+		Count int    `json:"count"`
+	}
+	secs := []secInfo{}
+	for _, k := range sortedKeys(rep) {
+		n := 0
+		switch v := rep[k].(type) {
+		case []any:
+			n = len(v)
+		case map[string]any:
+			n = len(v)
+		default:
+			n = 1
+		}
+		secs = append(secs, secInfo{Name: k, Count: n})
+	}
+
+	// 关键章节裁剪：数组型章节取前 N 条原样返回
+	trimArr := func(key string, n int) any {
+		v, ok := rep[key]
+		if !ok {
+			return nil
+		}
+		if arr, isArr := v.([]any); isArr && len(arr) > n {
+			return arr[:n]
+		}
+		return v
+	}
+	view := map[string]any{
+		"app":      app,
+		"sections": secs,
+		"details": map[string]any{
+			"manifest_analysis": trimArr("manifest_analysis", 60),
+			"code_analysis":     trimArr("code_analysis", 120),
+			"binary_analysis":   trimArr("binary_analysis", 40),
+			"secrets":           trimArr("secrets", 40),
+			"permissions":       trimArr("permissions", 120),
+			"urls":              trimArr("urls", 40),
+			"firebase_urls":     trimArr("firebase_urls", 20),
+			"certificate_analysis": trimArr("certificate_analysis", 20),
+			"exported_count":    rep["exported_count"],
+			"average_cvss":      rep["average_cvss"],
+			"appsec":            rep["appsec"],
+		},
+	}
+	writeJSON(w, 200, view)
+}
+
+// sortedKeys 返回 map 的 key 有序列表（章节展示顺序稳定）。
+func sortedKeys(m map[string]any) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
