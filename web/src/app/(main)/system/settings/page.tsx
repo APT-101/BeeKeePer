@@ -313,9 +313,10 @@ export default function SystemSettingsPage() {
           的 key 输入是条件渲染）。grid 会按最高的一张撑满整行、在旁边留下大片空白，
           多列则自动按内容高度平衡填充。卡片间距靠 mb 而非 gap——多列布局下
           column-gap 只管列间距，行间距要由子元素自己给。 */}
-      <div className="columns-1 gap-4 md:gap-6 lg:columns-2">
+      <div className="grid gap-4 md:gap-6 lg:grid-cols-2 items-start">
+        {/* ---- 网络与运行时 ---- */}
+        <div className="flex flex-col gap-4 md:gap-6">
         <UpdateCard />
-
         <Card className="mb-4 break-inside-avoid md:mb-6">
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
@@ -342,7 +343,6 @@ export default function SystemSettingsPage() {
             />
           </CardContent>
         </Card>
-
         <Card className="mb-4 break-inside-avoid md:mb-6">
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
@@ -370,7 +370,6 @@ export default function SystemSettingsPage() {
             />
           </CardContent>
         </Card>
-
         <Card className="mb-4 break-inside-avoid md:mb-6">
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
@@ -411,177 +410,6 @@ export default function SystemSettingsPage() {
             </p>
           </CardContent>
         </Card>
-
-        <Card className="mb-4 break-inside-avoid md:mb-6">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <ShieldAlertIcon className="size-4" />
-              操作约束注入
-            </CardTitle>
-            <CardDescription>
-              开启后，把每个任务的<b>操作约束</b>（在任务总览「操作约束」里维护的 allow/deny 条目）拼进对应 Agent
-              的系统提示，用来框定探索边界（如「仅测当前端口」「禁止爆破」）。
-              <br />
-              可分别控制注入到 <b>规划者（planner）</b>与 <b>执行者（worker）</b>
-              ；默认都开。切换即时生效（下一轮读取），无需重建 Agent。关闭后该 Agent 不再看到约束。
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-4">
-            <div className="flex items-center justify-between gap-4">
-              <Label htmlFor="inject-planner" className="text-sm font-normal text-muted-foreground">
-                注入规划者（planner）{injectPlanner ? " · 已开启" : " · 已关闭"}
-              </Label>
-              <Switch
-                id="inject-planner"
-                checked={injectPlanner}
-                disabled={!loaded}
-                onCheckedChange={toggleInjectPlanner}
-              />
-            </div>
-            <div className="flex items-center justify-between gap-4">
-              <Label htmlFor="inject-worker" className="text-sm font-normal text-muted-foreground">
-                注入执行者（worker）{injectWorker ? " · 已开启" : " · 已关闭"}
-              </Label>
-              <Switch
-                id="inject-worker"
-                checked={injectWorker}
-                disabled={!loaded}
-                onCheckedChange={toggleInjectWorker}
-              />
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="mb-4 break-inside-avoid md:mb-6">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <BinaryIcon className="size-4" />
-              反编译（IDA 无头导出）
-            </CardTitle>
-            <CardDescription>
-              在任务详情的<b>固件反编译</b>页勾选组件即可导出每个函数的伪 C 代码，产物落在
-              <code className="mx-1">data/tasks/&lt;id&gt;/decompile/&lt;sha8&gt;/</code>
-              下，只供人工查阅（不进 Agent 工具集）。这里配置 idat 的位置与限额：
-              安装目录留空时依次回退到环境变量 <code>ARTEX_IDA_DIR</code> 和 <code>PATH</code> 里的
-              <code className="mx-1">idat</code>。
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-3">
-            <div className="text-xs">
-              {decompStatus?.ok ? (
-                <span className="text-emerald-500">
-                  已检测到：<code>{decompStatus.idat}</code> · 插件 <code>{decompStatus.plugin}</code>
-                </span>
-              ) : (
-                <span className="text-red-500">
-                  不可用：{decompStatus?.error || "尚未检测"}（建导出任务会直接报错）
-                </span>
-              )}
-            </div>
-            <div className="grid gap-3 md:grid-cols-2">
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="decomp-ida-dir" className="text-muted-foreground text-sm font-normal">
-                  IDA 安装目录
-                </Label>
-                <Input
-                  id="decomp-ida-dir"
-                  value={decompIdaDir}
-                  onChange={(e) => setDecompIdaDir(e.target.value)}
-                  className="font-mono text-xs"
-                />
-              </div>
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="decomp-plugin" className="text-muted-foreground text-sm font-normal">
-                  INP.py 路径
-                </Label>
-                <Input
-                  id="decomp-plugin"
-                  value={decompPlugin}
-                  onChange={(e) => setDecompPlugin(e.target.value)}
-                  placeholder="留空 = <IDA>/plugins/INP.py"
-                  className="font-mono text-xs"
-                />
-              </div>
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="decomp-timeout" className="text-muted-foreground text-sm font-normal">
-                  单 job 超时（秒）
-                </Label>
-                <Input
-                  id="decomp-timeout"
-                  value={decompTimeout}
-                  onChange={(e) => setDecompTimeout(e.target.value)}
-                  inputMode="numeric"
-                  placeholder="1800"
-                />
-              </div>
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="decomp-max" className="text-muted-foreground text-sm font-normal">
-                  单次最多勾选组件
-                </Label>
-                <Input
-                  id="decomp-max"
-                  value={decompMaxComps}
-                  onChange={(e) => setDecompMaxComps(e.target.value)}
-                  inputMode="numeric"
-                  placeholder="8"
-                />
-              </div>
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="decomp-quota" className="text-muted-foreground text-sm font-normal">
-                  单任务产物配额（MB）
-                </Label>
-                <Input
-                  id="decomp-quota"
-                  value={decompQuota}
-                  onChange={(e) => setDecompQuota(e.target.value)}
-                  inputMode="numeric"
-                  placeholder="2048"
-                />
-              </div>
-              <div className="flex items-end">
-                <span className="text-muted-foreground text-xs">
-                  并发固定 1（IDA 许可），不可调
-                </span>
-              </div>
-            </div>
-            <div className="flex justify-end">
-              <Button size="sm" disabled={!loaded || savingDecompile} onClick={saveDecompile}>
-                保存反编译配置
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-
-        <EnginesCard />
-
-        <Card className="mb-4 break-inside-avoid md:mb-6">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <FlaskConicalIcon className="size-4" />
-              实验功能
-            </CardTitle>
-            <CardDescription>
-              尚在验证中的机制，默认关闭。可能改变 Agent 行为或影响稳定性，请在了解影响后启用。
-              <br />
-              <b>noa 上下文压缩</b>：由模型主动压缩长对话历史（norma v0.4.0）。开启后平台接入的四类 Agent（
-              <b>规划者 / 执行者 / 主 Agent / 对话</b>）改用 noa 接管上下文，取代内置压缩，
-              压缩原文会归档到任务工作目录下便于回溯。切换即时生效（对之后启动的运行生效），无需重建 Agent；
-              关闭后立即恢复内置压缩。
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="flex items-center justify-between gap-4">
-            <Label htmlFor="noa-compaction" className="text-sm font-normal text-muted-foreground">
-              noa 上下文压缩{noaCompaction ? " · 已开启" : " · 已关闭"}
-            </Label>
-            <Switch
-              id="noa-compaction"
-              checked={noaCompaction}
-              disabled={!loaded}
-              onCheckedChange={toggleNoaCompaction}
-            />
-          </CardContent>
-        </Card>
-
         <Card className="mb-4 break-inside-avoid md:mb-6">
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
@@ -767,7 +595,6 @@ export default function SystemSettingsPage() {
             )}
           </CardContent>
         </Card>
-
         <Card className="mb-4 break-inside-avoid md:mb-6">
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
@@ -797,7 +624,6 @@ export default function SystemSettingsPage() {
             </div>
           </CardContent>
         </Card>
-
         <Card className="mb-4 break-inside-avoid md:mb-6">
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
@@ -826,7 +652,6 @@ export default function SystemSettingsPage() {
             </div>
           </CardContent>
         </Card>
-
         <Card className="mb-4 break-inside-avoid md:mb-6">
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
@@ -858,6 +683,176 @@ export default function SystemSettingsPage() {
           </CardContent>
         </Card>
       </div>
-    </div>
+        </div>
+        {/* ---- 引擎与高级能力 ---- */}
+        <div className="flex flex-col gap-4 md:gap-6">
+        <Card className="mb-4 break-inside-avoid md:mb-6">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <ShieldAlertIcon className="size-4" />
+              操作约束注入
+            </CardTitle>
+            <CardDescription>
+              开启后，把每个任务的<b>操作约束</b>（在任务总览「操作约束」里维护的 allow/deny 条目）拼进对应 Agent
+              的系统提示，用来框定探索边界（如「仅测当前端口」「禁止爆破」）。
+              <br />
+              可分别控制注入到 <b>规划者（planner）</b>与 <b>执行者（worker）</b>
+              ；默认都开。切换即时生效（下一轮读取），无需重建 Agent。关闭后该 Agent 不再看到约束。
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-4">
+            <div className="flex items-center justify-between gap-4">
+              <Label htmlFor="inject-planner" className="text-sm font-normal text-muted-foreground">
+                注入规划者（planner）{injectPlanner ? " · 已开启" : " · 已关闭"}
+              </Label>
+              <Switch
+                id="inject-planner"
+                checked={injectPlanner}
+                disabled={!loaded}
+                onCheckedChange={toggleInjectPlanner}
+              />
+            </div>
+            <div className="flex items-center justify-between gap-4">
+              <Label htmlFor="inject-worker" className="text-sm font-normal text-muted-foreground">
+                注入执行者（worker）{injectWorker ? " · 已开启" : " · 已关闭"}
+              </Label>
+              <Switch
+                id="inject-worker"
+                checked={injectWorker}
+                disabled={!loaded}
+                onCheckedChange={toggleInjectWorker}
+              />
+            </div>
+          </CardContent>
+        </Card>
+        <Card className="mb-4 break-inside-avoid md:mb-6">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <BinaryIcon className="size-4" />
+              反编译（IDA 无头导出）
+            </CardTitle>
+            <CardDescription>
+              在任务详情的<b>固件反编译</b>页勾选组件即可导出每个函数的伪 C 代码，产物落在
+              <code className="mx-1">data/tasks/&lt;id&gt;/decompile/&lt;sha8&gt;/</code>
+              下，只供人工查阅（不进 Agent 工具集）。这里配置 idat 的位置与限额：
+              安装目录留空时依次回退到环境变量 <code>ARTEX_IDA_DIR</code> 和 <code>PATH</code> 里的
+              <code className="mx-1">idat</code>。
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-3">
+            <div className="text-xs">
+              {decompStatus?.ok ? (
+                <span className="text-emerald-500">
+                  已检测到：<code>{decompStatus.idat}</code> · 插件 <code>{decompStatus.plugin}</code>
+                </span>
+              ) : (
+                <span className="text-red-500">
+                  不可用：{decompStatus?.error || "尚未检测"}（建导出任务会直接报错）
+                </span>
+              )}
+            </div>
+            <div className="grid gap-3 md:grid-cols-2">
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="decomp-ida-dir" className="text-muted-foreground text-sm font-normal">
+                  IDA 安装目录
+                </Label>
+                <Input
+                  id="decomp-ida-dir"
+                  value={decompIdaDir}
+                  onChange={(e) => setDecompIdaDir(e.target.value)}
+                  className="font-mono text-xs"
+                />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="decomp-plugin" className="text-muted-foreground text-sm font-normal">
+                  INP.py 路径
+                </Label>
+                <Input
+                  id="decomp-plugin"
+                  value={decompPlugin}
+                  onChange={(e) => setDecompPlugin(e.target.value)}
+                  placeholder="留空 = <IDA>/plugins/INP.py"
+                  className="font-mono text-xs"
+                />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="decomp-timeout" className="text-muted-foreground text-sm font-normal">
+                  单 job 超时（秒）
+                </Label>
+                <Input
+                  id="decomp-timeout"
+                  value={decompTimeout}
+                  onChange={(e) => setDecompTimeout(e.target.value)}
+                  inputMode="numeric"
+                  placeholder="1800"
+                />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="decomp-max" className="text-muted-foreground text-sm font-normal">
+                  单次最多勾选组件
+                </Label>
+                <Input
+                  id="decomp-max"
+                  value={decompMaxComps}
+                  onChange={(e) => setDecompMaxComps(e.target.value)}
+                  inputMode="numeric"
+                  placeholder="8"
+                />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="decomp-quota" className="text-muted-foreground text-sm font-normal">
+                  单任务产物配额（MB）
+                </Label>
+                <Input
+                  id="decomp-quota"
+                  value={decompQuota}
+                  onChange={(e) => setDecompQuota(e.target.value)}
+                  inputMode="numeric"
+                  placeholder="2048"
+                />
+              </div>
+              <div className="flex items-end">
+                <span className="text-muted-foreground text-xs">
+                  并发固定 1（IDA 许可），不可调
+                </span>
+              </div>
+            </div>
+            <div className="flex justify-end">
+              <Button size="sm" disabled={!loaded || savingDecompile} onClick={saveDecompile}>
+                保存反编译配置
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+        <EnginesCard />
+        <Card className="mb-4 break-inside-avoid md:mb-6">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <FlaskConicalIcon className="size-4" />
+              实验功能
+            </CardTitle>
+            <CardDescription>
+              尚在验证中的机制，默认关闭。可能改变 Agent 行为或影响稳定性，请在了解影响后启用。
+              <br />
+              <b>noa 上下文压缩</b>：由模型主动压缩长对话历史（norma v0.4.0）。开启后平台接入的四类 Agent（
+              <b>规划者 / 执行者 / 主 Agent / 对话</b>）改用 noa 接管上下文，取代内置压缩，
+              压缩原文会归档到任务工作目录下便于回溯。切换即时生效（对之后启动的运行生效），无需重建 Agent；
+              关闭后立即恢复内置压缩。
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="flex items-center justify-between gap-4">
+            <Label htmlFor="noa-compaction" className="text-sm font-normal text-muted-foreground">
+              noa 上下文压缩{noaCompaction ? " · 已开启" : " · 已关闭"}
+            </Label>
+            <Switch
+              id="noa-compaction"
+              checked={noaCompaction}
+              disabled={!loaded}
+              onCheckedChange={toggleNoaCompaction}
+            />
+          </CardContent>
+        </Card>
+        </div>
+      </div>
   );
 }
