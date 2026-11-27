@@ -1198,6 +1198,36 @@ export const api = {
       api_key,
     }),
   testMobsf: () => post<{ ok: boolean; reason: string }>(`/mobsf/test`),
+  // ---- M2 动态轨：DroidBridge 设备反连网关 ----
+  getMobileConfig: () =>
+    get<{
+      configured: boolean;
+      token_masked: string;
+      endpoint: string;
+      online_devices: {
+        deviceId: string;
+        model: string;
+        androidVersion: string;
+        rooted: boolean;
+        connectedFor: number;
+        occupiedBy: string;
+      }[];
+    }>(`/mobile/config`),
+  rotateMobileToken: () =>
+    post<{
+      configured: boolean;
+      token_masked: string;
+      online_devices: {
+        deviceId: string;
+        model: string;
+        androidVersion: string;
+        rooted: boolean;
+        connectedFor: number;
+        occupiedBy: string;
+      }[];
+    }>(`/mobile/config`, {
+      regenerate: true,
+    }),
   // 有固件/组件关联的任务 id 集合（组件页任务筛选下拉只列这些，纯 Web 任务不出现）
   componentTaskIds: () =>
     get<{ task_ids: number[] }>(`/components/counts?by=task`).then((r) => r?.task_ids ?? []),

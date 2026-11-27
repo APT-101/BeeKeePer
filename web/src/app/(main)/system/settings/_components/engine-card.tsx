@@ -91,6 +91,60 @@ export function EnginesCard() {
       <span className="text-muted-foreground">● {p.reason || "未测试"}</span>
     );
 
+  // ---- M2 动态轨：DroidBridge 反连网关 ----
+  type MobileDevice = {
+    deviceId: string;
+    model: string;
+    androidVersion: string;
+    rooted: boolean;
+    connectedFor: number;
+    occupiedBy: string;
+  };
+  const [mobileCfg, setMobileCfg] = React.useState<{
+    configured: boolean;
+    token_masked: string;
+    online_devices: MobileDevice[];
+  } | null>(null);
+  const [mobileLoaded, setMobileLoaded] = React.useState(false);
+  const [rotating, setRotating] = React.useState(false);
+
+  const loadMobile = React.useCallback(() => {
+    api
+      .getMobileConfig()
+      .then((c) => {
+        setMobileCfg(c);
+        setMobileLoaded(true);
+      })
+      .catch(() => setMobileLoaded(true));
+  }, []);
+
+  React.useEffect(() => {
+    loadMobile();
+    const timer = setInterval(loadMobile, 10000); // 设备在线状态 10s 自动刷新
+    return () => clearInterval(timer);
+  }, [loadMobile]);
+
+  const rotateMobileToken = () => {
+    setRotating(true);
+    api
+      .rotateMobileToken()
+      .then((c) => {
+        setMobileCfg((prev) =>
+          prev
+            ? {
+                ...prev,
+                configured: c.configured,
+                token_masked: c.token_masked,
+                online_devices: c.online_devices,
+              }
+            : prev
+        );
+        toast.success("配对 token 已更换——旧 token 立即失效，设备需重填后重新反连");
+      })
+      .catch((e) => toast.error("更换失败：" + (e as Error).message))
+      .finally(() => setRotating(false));
+  };
+
   return (
     <Card className="mb-4 break-inside-avoid md:mb-6">
       <CardHeader>
@@ -166,6 +220,63 @@ export function EnginesCard() {
             <b> mobsf_scan</b> 工具交给它做全量静态扫描（manifest 分析 / 代码规则 / 硬编码密钥），
             结果自动落 finding 与组件。
           </p>
+        </div>
+
+        {/* ---- M2 动态轨：DroidBridge 反连网关 ---- */}
+        <div className="border-t pt-4 flex flex-col gap-3">
+          <div className="flex items-center justify-between">
+            <Label className="text-sm font-semibold">DroidBridge（移动动态分析 · 设备反连）</Label>
+            <span
+              className={`text-xs ${
+                mobileCfg?.configured && (mobileCfg.online_devices?.length ?? 0) > 0
+                  ? "text-emerald-500"
+                  : "text-muted-foreground"
+              }`}
+            >
+              {mobileCfg?.configured
+                ? `${mobileCfg.online_devices?.length ?? 0} 台设备在线`
+                : "未配置"}
+            </span>
+          </div>
+          <p className="text-muted-foreground text-xs leading-relaxed">
+            在 root Android 设备上安装 DroidBridge APK，反连地址填{" "}
+            <code className="font-mono">ws://&lt;控制台IP&gt;:8787/ws/droid</code>，token 填下方配对令牌。
+            设备上线后，任务里的 <b>mobile_exec / mobile_screencap / mobile_push</b> 等工具即可操作真机
+            （安装运行应用、frida hook、抓包、拉取文件），发现自动落 finding。
+          </p>
+          <div className="flex flex-col gap-1.5">
+            <Label className="text-muted-foreground text-sm font-normal">
+              配对 Token {mobileCfg?.configured && mobileCfg.token_masked && (
+                <span className="ml-1 font-mono text-emerald-500">
+                  已配置（{mobileCfg.token_masked}）
+                </span>
+              )}
+            </Label>
+            <div className="flex items-center gap-2">
+              <Button size="sm" variant="outline" onClick={rotateMobileToken} disabled={!mobileLoaded || rotating}>
+                {rotating ? "更换中…" : "更换配对 Token"}
+              </Button>
+              <Button size="sm" variant="ghost" onClick={loadMobile} disabled={!mobileLoaded}>
+                刷新设备列表
+              </Button>
+            </div>
+          </div>
+          {(mobileCfg?.online_devices?.length ?? 0) > 0 && (
+            <div className="rounded-md border p-2 flex flex-col gap-2">
+              {mobileCfg!.online_devices.map((d) => (
+                <div key={d.deviceId} className="flex items-center justify-between text-xs">
+                  <div className="min-w-0">
+                    <span className="font-medium">{d.model}</span>
+                    <span className="ml-2 text-muted-foreground">
+                      Android {d.androidVersion} · root={String(d.rooted)} · 在线 {d.connectedFor}s
+                      {d.occupiedBy ? ` · 被任务 ${d.occupiedBy} 占用` : ""}
+                    </span>
+                  </div>
+                  <span className="font-mono text-muted-foreground">{d.deviceId.slice(0, 8)}…</span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* ---- AI-Infra-Guard（预留）---- */}

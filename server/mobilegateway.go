@@ -469,3 +469,67 @@ func (s *Server) mobileFileHTTP(w http.ResponseWriter, r *http.Request) {
 	_, _ = io.Copy(w, f)
 }
 // 路由注册提醒：/api/mobile/file 挂根 mux（见 server.go，精确路径优先于 /api/ 前缀）。
+// GET/POST /api/mobile/config —— 设置页的 Bridge 配对配置（GET 读 token 脱敏
+// 与在线设备列表；POST regenerate=true 生成新配对 token——旧 token 立即失效，
+// 设备需重填）。
+func (s *Server) mobileConfigHTTP(w http.ResponseWriter, r *http.Request) {
+	pg := s.m.PG()
+	if pg == nil {
+		writeErr(w, 503, "database unavailable")
+		return
+	}
+	if r.Method == http.MethodPost {
+		var req struct {
+			Regenerate bool `json:"regenerate"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeErr(w, 400, "bad json: "+err.Error())
+			return
+		}
+		if req.Regenerate {
+			b := make([]byte, 16)
+			if _, err := rand.Read(b); err != nil {
+				writeErr(w, 500, err.Error())
+				return
+			}
+			newTok := hex.EncodeToString(b)
+			if err := pg.SetSetting(mobileBridgeTokenSetting, newTok); err != nil {
+				writeErr(w, 500, err.Error())
+				return
+			}
+			// token 更换：踢掉全部已连接设备（旧 token 失效），设备需重填后反连。
+			mobHub.mu.Lock()
+			for _, d := range mobHub.devices {
+				d.conn.WriteControl(websocket.CloseMessage,
+					websocket.FormatCloseMessage(4002, "token rotated"), time.Now().Add(2*time.Second))
+				d.conn.Close()
+			}
+			mobHub.devices = map[string]*droidConn{}
+			mobHub.mu.Unlock()
+		}
+	}
+	tok := s.mobileBridgeToken()
+	masked := ""
+	if tok != "" && len(tok) > 6 {
+		masked = tok[:3] + "…" + tok[len(tok)-3:]
+	}
+	mobHub.mu.RLock()
+	list := make([]map[string]any, 0, len(mobHub.devices))
+	for id, d := range mobHub.devices {
+		list = append(list, map[string]any{
+			"deviceId":       id,
+			"model":          d.model,
+			"androidVersion": d.androidVersion,
+			"rooted":         d.rooted,
+			"connectedFor":   int(time.Since(d.connectedAt).Seconds()),
+			"occupiedBy":     d.occupiedBy,
+		})
+	}
+	mobHub.mu.RUnlock()
+	writeJSON(w, 200, map[string]any{
+		"configured":     tok != "",
+		"token_masked":   masked,
+		"endpoint":       "/ws/droid",
+		"online_devices": list,
+	})
+}

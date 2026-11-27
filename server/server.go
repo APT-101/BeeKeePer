@@ -1035,6 +1035,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/ws/droid", s.mobileGatewayWS)                          // 设备反连 WebSocket（token 查询串配对）
 	mux.HandleFunc("GET /api/mobile/devices", s.mobileDevicesHTTP)          // 在线设备列表
 	mux.HandleFunc("POST /api/mobile/devices/{id}/rpc", s.mobileRPCHTTP)    // 向设备投递协议命令
+	mux.HandleFunc("/api/mobile/config", s.mobileConfigHTTP)                // Bridge 配对 token 读写 + 在线设备列表
 	mux.HandleFunc("GET /api/tasks/{id}/chat/status", s.taskChatStatus)
 	mux.HandleFunc("POST /api/tasks/{id}/chat/stop", s.stopChat)
 
