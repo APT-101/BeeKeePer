@@ -1027,7 +1027,6 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/mobsf/config", s.mobsfConfigHTTP) // MobSF 静态引擎接入配置（GET 读/POST 写）
 	mux.HandleFunc("POST /api/mobsf/test", s.mobsfTestHTTP) // MobSF 连通性测试（设置页"测试连接"）
 	mux.HandleFunc("POST /api/tasks/{id}/mobsf/scan", s.mobsfScanHTTP) // MobSF 静态扫描（GUI/调试用；agent 走 mobsf_scan 工具）
-	mux.HandleFunc("GET /api/tasks/{id}/mobsf/report", s.mobsfReportViewHTTP) // MobSF 报告 GUI 视图（裁剪版，M1.5）
 	mux.HandleFunc("GET /api/tasks/{id}/chat/status", s.taskChatStatus)
 	mux.HandleFunc("POST /api/tasks/{id}/chat/stop", s.stopChat)
 

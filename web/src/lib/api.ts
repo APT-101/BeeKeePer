@@ -1197,13 +1197,6 @@ export const api = {
       api_key,
     }),
   testMobsf: () => post<{ ok: boolean; reason: string }>(`/api/mobsf/test`),
-  // MobSF 报告 GUI 视图（裁剪版：应用信息 + 章节清单 + 关键章节条目）
-  getMobsfReport: (taskId: string) =>
-    get<{
-      app: Record<string, unknown>;
-      sections: { name: string; count: number }[];
-      details: Record<string, unknown>;
-    }>(`/api/tasks/${taskId}/mobsf/report`),
   // 有固件/组件关联的任务 id 集合（组件页任务筛选下拉只列这些，纯 Web 任务不出现）
   componentTaskIds: () =>
     get<{ task_ids: number[] }>(`/components/counts?by=task`).then((r) => r?.task_ids ?? []),
