@@ -1027,6 +1027,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/mobsf/config", s.mobsfConfigHTTP) // MobSF 静态引擎接入配置（GET 读/POST 写）
 	mux.HandleFunc("POST /api/mobsf/test", s.mobsfTestHTTP) // MobSF 连通性测试（设置页"测试连接"）
 	mux.HandleFunc("POST /api/tasks/{id}/mobsf/scan", s.mobsfScanHTTP) // MobSF 静态扫描（GUI/调试用；agent 走 mobsf_scan 工具）
+	// M2 动态轨：DroidBridge 设备反连网关 + 管理 API
+	mux.HandleFunc("/ws/droid", s.mobileGatewayWS)                          // 设备反连 WebSocket（token 查询串配对）
+	mux.HandleFunc("GET /api/mobile/devices", s.mobileDevicesHTTP)          // 在线设备列表
+	mux.HandleFunc("POST /api/mobile/devices/{id}/rpc", s.mobileRPCHTTP)    // 向设备投递协议命令
 	mux.HandleFunc("GET /api/tasks/{id}/chat/status", s.taskChatStatus)
 	mux.HandleFunc("POST /api/tasks/{id}/chat/stop", s.stopChat)
 
@@ -1142,6 +1146,9 @@ func (s *Server) Handler() http.Handler {
 	api := cors(s.requireAuth(mux))
 	root := http.NewServeMux()
 	root.Handle("/api/", api)
+	// M2 动态轨：DroidBridge 设备反连 WebSocket 挂根 mux（不走 /api/ 前缀——
+	// 设备没有 JWT，认证就是查询串里的配对 token，handler 内自行校验）。
+	root.HandleFunc("/ws/droid", s.mobileGatewayWS)
 	// M0: aggregating counters only — no task data — so it can stay public
 	// (matches the docs: /metrics scraped by Prometheus, no auth required).
 	root.Handle("/metrics", s.metricsHandler())
