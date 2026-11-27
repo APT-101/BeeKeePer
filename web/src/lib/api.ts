@@ -1189,14 +1189,15 @@ export const api = {
       `/components/counts?by=firmware${taskId ? `&task_id=${encodeURIComponent(taskId)}` : ""}`,
     ),
   // ---- MobSF 静态引擎（外挂引擎·移动双轨静态轨）----
+  // 注意：get/post helper 会自动拼 `/api` 前缀，这里 path 不带 /api。
   mobsfConfig: () =>
-    get<{ api_url: string; configured: boolean; api_key_masked: string }>(`/api/mobsf/config`),
+    get<{ api_url: string; configured: boolean; api_key_masked: string }>(`/mobsf/config`),
   saveMobsfConfig: (api_url: string, api_key: string) =>
-    post<{ api_url: string; configured: boolean; api_key_masked: string }>(`/api/mobsf/config`, {
+    post<{ api_url: string; configured: boolean; api_key_masked: string }>(`/mobsf/config`, {
       api_url,
       api_key,
     }),
-  testMobsf: () => post<{ ok: boolean; reason: string }>(`/api/mobsf/test`),
+  testMobsf: () => post<{ ok: boolean; reason: string }>(`/mobsf/test`),
   // 有固件/组件关联的任务 id 集合（组件页任务筛选下拉只列这些，纯 Web 任务不出现）
   componentTaskIds: () =>
     get<{ task_ids: number[] }>(`/components/counts?by=task`).then((r) => r?.task_ids ?? []),
