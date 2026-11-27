@@ -16,6 +16,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -198,7 +199,7 @@ func (s *Server) mobileGatewayWS(w http.ResponseWriter, r *http.Request) {
 		var probe struct {
 			T     string          `json:"t"`
 			ReqID string          `json:"reqId"`
-			Data  string          `json:"data"`
+			B64   string          `json:"b64"`
 			Done  bool            `json:"done"`
 		}
 		if json.Unmarshal(raw, &probe) != nil {
@@ -213,7 +214,7 @@ func (s *Server) mobileGatewayWS(w http.ResponseWriter, r *http.Request) {
 		conn.mu.Lock()
 		if probe.T == "data" {
 			// 二进制分片：追加 b64 载荷；done 时解码落盘并把响应换成交付帧。
-			if raw64, derr := base64.StdEncoding.DecodeString(probe.Data); derr == nil {
+			if raw64, derr := base64.StdEncoding.DecodeString(probe.B64); derr == nil {
 				dataBuf[probe.ReqID] = append(dataBuf[probe.ReqID], raw64...)
 			}
 			if !probe.Done {
@@ -427,3 +428,44 @@ func (s *Server) mobilePushFile(d *droidConn, taskID int64, frame map[string]any
 	}
 	return out, nil
 }
+// GET /api/mobile/file?task=<id>&path=<rel> —— 设备侧拉取任务文件
+// （push 大文件的替代通道：18MB APK 走一次 HTTP 下载，而非 73 帧 WS 消息
+// ——WS 分片会塞满设备端 OkHttp 的 4MB 发送队列水位导致背压超时）。
+// 认证：查询串 token（与反连配对 token 同源）。
+func (s *Server) mobileFileHTTP(w http.ResponseWriter, r *http.Request) {
+	token := s.mobileBridgeToken()
+	if token == "" {
+		http.Error(w, "mobile bridge 未启用", http.StatusServiceUnavailable)
+		return
+	}
+	if strings.TrimSpace(r.URL.Query().Get("token")) != token {
+		http.Error(w, "token 不匹配", http.StatusUnauthorized)
+		return
+	}
+	taskID := strings.TrimSpace(r.URL.Query().Get("task"))
+	if _, ok := s.m.Task(taskID); !ok {
+		http.Error(w, "task not found", http.StatusNotFound)
+		return
+	}
+	rel := strings.TrimPrefix(filepath.ToSlash(r.URL.Query().Get("path")), "/")
+	if strings.HasPrefix(rel, "..") || filepath.IsAbs(rel) {
+		http.Error(w, "path 非法", http.StatusBadRequest)
+		return
+	}
+	abs := filepath.Join(s.m.dir, "tasks", taskID, filepath.FromSlash(rel))
+	info, err := os.Stat(abs)
+	if err != nil || info.IsDir() {
+		http.Error(w, "file not found", http.StatusNotFound)
+		return
+	}
+	f, err := os.Open(abs)
+	if err != nil {
+		http.Error(w, "open failed", http.StatusInternalServerError)
+		return
+	}
+	defer f.Close()
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", info.Size()))
+	_, _ = io.Copy(w, f)
+}
+// 路由注册提醒：/api/mobile/file 挂根 mux（见 server.go，精确路径优先于 /api/ 前缀）。

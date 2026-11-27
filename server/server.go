@@ -1153,6 +1153,8 @@ func (s *Server) Handler() http.Handler {
 	// M2 动态轨：DroidBridge 设备反连 WebSocket 挂根 mux（不走 /api/ 前缀——
 	// 设备没有 JWT，认证就是查询串里的配对 token，handler 内自行校验）。
 	root.HandleFunc("/ws/droid", s.mobileGatewayWS)
+	// 设备侧大文件拉取（push 大文件的替代通道：一次 HTTP 下载而非 73 帧 WS 分片）。
+	root.HandleFunc("/api/mobile/file", s.mobileFileHTTP)
 	// M0: aggregating counters only — no task data — so it can stay public
 	// (matches the docs: /metrics scraped by Prometheus, no auth required).
 	root.Handle("/metrics", s.metricsHandler())
