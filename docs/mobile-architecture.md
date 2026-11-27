@@ -38,15 +38,16 @@
 
 ## 动态轨：设备池 + Sentinel 反连
 
-### 设备池：三种 provider，统一接口
+### 设备池：Bridge 反连为主力（2026-11-27 决策调整）
+
+> **架构决策（用户定）**：部署环境多为虚拟机（无嵌套虚拟化，/dev/kvm 不可用），Android emulator/redroid 类模拟器路线**不现实，已移除**。动态轨设备接入以 **Sentinel 设备端 Bridge 反连**为主力——设备（Android 真机/越狱 iOS）主动 wss 反连控制台，NAT 穿越无需公网 IP，天然适配分布式真机。
 
 | provider | 形态 | 复位方式 | 覆盖场景 |
 |---|---|---|---|
-| `emulator` | Android 模拟器实例池（headless，Google APIs 镜像可 root） | **快照恢复**（回到干净状态=完美任务隔离，免费） | 动态功能测试主力 + CI 自动化；MITM 直达（模拟器 NAT 10.0.2.2=宿主，流量直接可达 :8788，无需 TCP 隧道） |
-| `adb` | 真机（USB/网络 adb） | adb uninstall / 手动 | 本地真机调试 |
-| `bridge` | SentinelBridge（iOS 越狱真机）/ DroidBridge（root Android 真机） | 设备复位钩子（装包/hook 残留清理） | 反检测 app、厂商 ROM 差异、TEE/硬件层、iOS 全部动态能力 |
+| `bridge` | **Sentinel 式设备端 Bridge 反连**（DroidBridge：root Android 真机；SentinelBridge：越狱 iOS） | 设备复位钩子（装包/hook 残留清理） | **动态轨主力**：全部动态能力——frida hook、流量、反检测 App、厂商 ROM、TEE/硬件层、iOS |
+| `adb` | 真机（USB/网络 adb，同网段直连） | adb uninstall / 手动 | 本地真机调试的快捷通道（降级路径） |
 
-统一接口：**占用锁**（任务独占设备，frida attach/tcpdump 都是独占的）+ **心跳健康** + **复位语义**。
+统一接口：**占用锁**（任务独占设备，frida attach/tcpdump 都是独占的）+ **心跳健康** + **复位语义**——Bridge 反连的设备注册表复用同一抽象。
 
 ### iOS 的硬边界
 
@@ -80,8 +81,8 @@
 
 ## 分期实施
 
-1. **M1（静态先行）**：Kali 沙箱装 jadx/apktool/mobsfscan；移动静态任务类型（APK/IPA 上传 → 扫描 → SARIF→finding → 组件登记）；与 MobSF 静态规则对齐的覆盖基线。
-2. **M2（动态 Android）**：模拟器实例池（headless + 快照）+ DroidBridge fork（协议不变）+ mobile gateway（wss/token/占用锁）+ LLM 工具层（exec/pull/push/screencap/流量→MITM）。
+1. **M1（静态先行，✅ 已完成）**：外挂 MobSF 服务 REST 集成；移动静态任务（APK/IPA 上传 → 扫描 → finding/组件登记）；Android（OVAA/MASTG/ViPlexHandy）+ iOS（iBugBazaar）双平台验证。
+2. **M2（动态 Android，Bridge 主力）**：mobile gateway（wss/token/设备注册表/占用锁）+ DroidBridge 设备端 fork（协议不变）+ LLM 工具层（exec/pull/push/screencap/流量→MITM）。~~模拟器实例池~~（已移除：VM 部署环境无嵌套虚拟化，不现实）。
 3. **M3（动态 iOS）**：SentinelBridge fork（rootless 优先）+ 砸壳 dump 喂静态引擎 + iOS 工具层。
 4. **M4（串联）**：静态发现→动态验证意图的 planner 编排；设备复位钩子；多设备调度。
 
