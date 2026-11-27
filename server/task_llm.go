@@ -571,6 +571,26 @@ func (s *Server) agentsForTask(t *Task) *taskAgentBundle {
 	wk.SetProxy(s.m.ProxyAddr(), s.m.ProxyCACert())
 	wk.SetWebSearch(s.webSearchFor("worker"))
 	wk.SetConstraintInject(s.constraintInjectWorker) // 操作约束注入 worker(可配置,默认开)
+	// MobSF 静态扫描接线：任务级 worker 的 mobsf_scan 工具走这里（与 main 的
+	// wire 同款；buildPlannerWorker 路径的 worker 已另行接线）。
+	{
+		tt := t
+		wk.SetMobsfScan(func(taskID int64, relPath string) (map[string]any, error) {
+			target := tt
+			if strconv.FormatInt(taskID, 10) != tt.ID {
+				other, ok := s.m.Task(strconv.FormatInt(taskID, 10))
+				if !ok {
+					return nil, fmt.Errorf("task #%d 不存在", taskID)
+				}
+				target = other
+			}
+			return s.runMobsfScan(context.Background(), target, relPath)
+		})
+	}
+	// M2 动态轨：mobile_* 工具的设备命令通道（复用 hub，任务占用自动登记）。
+	wk.SetMobileFn(func(taskID int64, frame map[string]any) (map[string]any, error) {
+		return s.mobileToolCall(taskID, frame)
+	})
 	pl := agent.NewPlanner(plannerRuntime, "task-router", s.m.dir, tx, plannerRuntime.CompactionWindow(), s.agentMaxTurns("planner"))
 	pl.SetFindingRecorder(s.evidenceStore())
 	pl.SetCompactionWindowResolver(plannerRuntime.CompactionWindow)
@@ -600,6 +620,10 @@ func (s *Server) agentsForTask(t *Task) *taskAgentBundle {
 			return s.runMobsfScan(context.Background(), target, relPath)
 		})
 	}
+	// M2 动态轨：mobile_* 工具的设备命令通道。
+	main.SetMobileFn(func(taskID int64, frame map[string]any) (map[string]any, error) {
+		return s.mobileToolCall(taskID, frame)
+	})
 	main.SetCompactionWindowResolver(mainRuntime.CompactionWindow)
 	main.SetNonStreaming(mainRuntime.nonStreaming)
 	main.SetMaxTokens(mainRuntime.maxTokens)

@@ -603,6 +603,10 @@ func (s *Server) applyLLM(cfg agent.Config) error {
 			return s.runMobsfScan(context.Background(), t, relPath)
 		}
 		s.mainAgent.SetMobsfScan(scanFn)
+	// M2 动态轨：mobile_* 工具的设备命令通道。
+	s.mainAgent.SetMobileFn(func(taskID int64, frame map[string]any) (map[string]any, error) {
+		return s.mobileToolCall(taskID, frame)
+	})
 	}
 	s.mainAgent.SetFindingRecorder(s.evidenceStore())
 	s.mainAgent.SetProxy(s.m.ProxyAddr(), s.m.ProxyCACert()) // WebFetch through the recording proxy

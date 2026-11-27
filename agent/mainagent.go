@@ -22,6 +22,8 @@ type MainAgent struct {
 	// mobsfScanFn 是 server 注入的 MobSF 静态扫描函数（nil = 未配置/未 wire），
 	// 装配 ToolSet 时转发给 mobsf_scan 工具（chat 场景的静态引擎入口）。
 	mobsfScanFn  func(taskID int64, relPath string) (map[string]any, error)
+	// mobileFn 是 server 注入的设备命令通道（M2 动态轨，nil = 无设备/未接线）。
+	mobileFn     func(taskID int64, frame map[string]any) (map[string]any, error)
 	prov            llm.Provider
 	model           string
 	tx              *transcript.Store                      // raw LLM conversation persistence (nil = off)
@@ -47,6 +49,11 @@ func (m *MainAgent) SetNoaEnabled(fn func() bool) { m.noaEnabledFn = fn }
 // MobSF 未配置/未 wire，mobsf_scan 工具报"未启用"。
 func (m *MainAgent) SetMobsfScan(fn func(taskID int64, relPath string) (map[string]any, error)) {
 	m.mobsfScanFn = fn
+}
+
+// SetMobileFn 注入 DroidBridge 设备命令通道（server 的 mobileToolCall）。
+func (m *MainAgent) SetMobileFn(fn func(taskID int64, frame map[string]any) (map[string]any, error)) {
+	m.mobileFn = fn
 }
 
 // SetNonStreaming wires a resolver deciding whether runs use the non-streaming
@@ -131,7 +138,8 @@ func (m *MainAgent) Chat(ctx context.Context, taskID int64, mainSeg int, as *db.
 	tsx.SetResumeTask(resume)     // set_goals 新增目标 → 把已完成/暂停的任务拉回 running
 	tsx.SetNotifyGoal(notifyGoal) // set_goals 新增目标 → 给 planner 记一条「人新增了目标：…」触发
 	tsx.SetNotifyHint(notifyHint) // add_hint 新增提示 → 给 planner 记一条「人新增了 N 条战略提示：…」触发
-	tsx.SetMobsfScan(m.mobsfScanFn) // MobSF 静态扫描（nil = 未配置，工具报"未启用"）
+	tsx.SetMobsfScan(m.mobsfScanFn)
+	tsx.SetMobileFn(m.mobileFn) // MobSF 静态扫描（nil = 未配置，工具报"未启用"）
 	tsx.steerWork = m.steerWork   // enable steer_work tool (nil = unavailable)
 	// 领域工具 + 基础默认工具集（Read/Write/Edit/MultiEdit/LS/Glob/Grep/Bash）
 	// 资产覆盖度功能关闭时剔除 add_task_scope/list_untested_assets（不入 prompt）。

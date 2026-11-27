@@ -56,6 +56,8 @@ type Worker struct {
 	// mobsfScan 是 server 注入的 MobSF 静态扫描函数（nil = 未配置/未 wire），
 	// execute 时转发给 ToolSet 供 mobsf_scan 工具调用。
 	mobsfScan     func(taskID int64, relPath string) (map[string]any, error)
+	// mobileFn 是 server 注入的设备命令通道（M2 动态轨，nil = 无设备/未接线）。
+	mobileFn      func(taskID int64, frame map[string]any) (map[string]any, error)
 	prov            llm.Provider
 	model           string
 	workDir         string
@@ -136,6 +138,10 @@ func (w *Worker) SetMobsfScan(fn func(taskID int64, relPath string) (map[string]
 	w.mobsfScan = fn
 }
 
+// SetMobileFn 注入 DroidBridge 设备命令通道（server 的 mobileToolCall）。
+func (w *Worker) SetMobileFn(fn func(taskID int64, frame map[string]any) (map[string]any, error)) {
+	w.mobileFn = fn
+}
 func (w *Worker) maxTokens() int {
 	if w.maxTokensFn == nil {
 		return 0
@@ -373,6 +379,7 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 	tsx.SetFindingRecorder(w.findingRecorder)
 	tsx.SetTaskID(taskID)
 	tsx.SetMobsfScan(w.mobsfScan)
+	tsx.SetMobileFn(w.mobileFn)
 	coverageEnabled := as == nil || as.CoverageEnabled(taskID)
 	tsx.SetCoverageEnabled(coverageEnabled)
 	if as != nil {

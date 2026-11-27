@@ -605,7 +605,7 @@ func splitLines(s string) []string {
 
 // WorkerTools returns the tool set for a work agent.
 func (t *ToolSet) WorkerTools() []actool.CoreTool {
-	return []actool.CoreTool{
+	tools := []actool.CoreTool{
 		// list_findings 保留：报漏洞前先查本任务已确认漏洞，避免重复上报同一漏洞。
 		t.listFindings(),
 		t.addFinding(), t.recordFact(),
@@ -615,6 +615,7 @@ func (t *ToolSet) WorkerTools() []actool.CoreTool {
 		// IoT 固件组件（handlers guard nil store internally）：
 		// register_extract 只给 worker —— 解包是 worker 的活，解完登记，后续意图复用。
 		t.insertComponents(), t.listComponents(), t.registerExtract(), t.mobsfScan(),
+		// M2 动态轨：mobile_* 工具（DroidBridge 反连设备的编程通道）。
 		// 跨 work 回看：worker 也可复用其他 work 的观察，避免重复劳动。
 		// search_all_worker_traces：不必先知道 intent_id，按关键字全局捞命中步骤；
 		// get_worker_trace：锁定某条 work 后列步骤/就地搜/取完整内容。
@@ -624,11 +625,13 @@ func (t *ToolSet) WorkerTools() []actool.CoreTool {
 		// 以下工具仍【不给】worker，只留给 planner/main（读上下文、跨 work 复盘是规划职责，
 		// worker 只做单条意图的执行与写回）：list_facts / list_companies / list_worker_traces。
 	}
+	tools = append(tools, t.mobileTools()...)
+	return tools
 }
 
 // MainAgentTools returns the human-interface tool set.
 func (t *ToolSet) MainAgentTools() []actool.CoreTool {
-	return []actool.CoreTool{
+	tools := []actool.CoreTool{
 		t.graphOverview(), t.listFindings(), t.listFacts(), t.nodeDetail(),
 		t.expandDigest(), t.expandIndex(), // cold-digest §6.1
 		t.getWorkerOutput(), t.getWorkerTrace(), t.searchAllWorkerTraces(), t.addHint(), t.addIntent(),
@@ -642,11 +645,14 @@ func (t *ToolSet) MainAgentTools() []actool.CoreTool {
 		t.insertAssets(), t.addCompanyScope(), t.listAssets(),
 		// IoT 固件组件（handlers guard nil store internally）
 		t.insertComponents(), t.listComponents(), t.setComponentStatus(), t.registerExtract(), t.mobsfScan(),
+		// M2 动态轨：mobile_* 工具（chat 场景也可操作反连设备）。
 		t.addFinding(), t.recordFact(),
 		t.addTaskScope(),
 		// list_untested_assets：按需查本任务范围内未测资产(类型+分页)，自行决定补测。
 		t.listUntestedAssets(),
 	}
+	tools = append(tools, t.mobileTools()...)
+	return tools
 }
 
 // AllDomainTools returns the union of all domain tools across all agent types,

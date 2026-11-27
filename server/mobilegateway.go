@@ -12,11 +12,14 @@ package server
 import (
 	"context"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -182,6 +185,9 @@ func (s *Server) mobileGatewayWS(w http.ResponseWriter, r *http.Request) {
 	log.Printf("[mobile gateway] 设备 %s 上线（%s / Android %s / root=%v）", deviceID, conn.model, conn.androidVersion, conn.rooted)
 
 	// 读循环：hb → lastSeen；response/data → pending 转发。
+	// data 帧（t:"data"，b64 分片+seq+done）按 reqId 聚合：done 到达后解码
+	// 落盘到 tasks/<id>/mobile/，并以聚合后的 result 转发给等待者。
+	dataBuf := map[string][]byte{} // reqId → 已聚合的原始字节
 	for {
 		ws.SetReadDeadline(time.Now().Add(60 * time.Second))
 		_, raw, err := ws.ReadMessage()
@@ -192,6 +198,8 @@ func (s *Server) mobileGatewayWS(w http.ResponseWriter, r *http.Request) {
 		var probe struct {
 			T     string          `json:"t"`
 			ReqID string          `json:"reqId"`
+			Data  string          `json:"data"`
+			Done  bool            `json:"done"`
 		}
 		if json.Unmarshal(raw, &probe) != nil {
 			continue
@@ -199,13 +207,46 @@ func (s *Server) mobileGatewayWS(w http.ResponseWriter, r *http.Request) {
 		if probe.T == "hb" {
 			continue
 		}
-		if probe.ReqID != "" {
-			conn.mu.Lock()
+		if probe.ReqID == "" {
+			continue
+		}
+		conn.mu.Lock()
+		if probe.T == "data" {
+			// 二进制分片：追加 b64 载荷；done 时解码落盘并把响应换成交付帧。
+			if raw64, derr := base64.StdEncoding.DecodeString(probe.Data); derr == nil {
+				dataBuf[probe.ReqID] = append(dataBuf[probe.ReqID], raw64...)
+			}
+			if !probe.Done {
+				conn.mu.Unlock()
+				continue
+			}
+			bin := dataBuf[probe.ReqID]
+			delete(dataBuf, probe.ReqID)
+			// 落盘：tasks/<taskID>/mobile/<reqId>.bin（taskID 从占用/上下文取，
+			// 无占用时落 data 目录）。
+			dir := s.mobileDropDir(conn.deviceID)
+			_ = os.MkdirAll(dir, 0o755)
+			out := filepath.Join(dir, probe.ReqID+".bin")
+			_ = os.WriteFile(out, bin, 0o644)
+			var chunk map[string]any
+			_ = json.Unmarshal(raw, &chunk)
+			chunk["t"] = "result"
+			chunk["ok"] = true
+			chunk["file_path"] = out
+			chunk["bytes"] = len(bin)
+			delete(chunk, "data")
+			delete(chunk, "seq")
+			fixed, _ := json.Marshal(chunk)
 			if ch, ok := conn.pending[probe.ReqID]; ok {
-				ch <- json.RawMessage(raw)
+				ch <- json.RawMessage(fixed)
 			}
 			conn.mu.Unlock()
+			continue
 		}
+		if ch, ok := conn.pending[probe.ReqID]; ok {
+			ch <- json.RawMessage(raw)
+		}
+		conn.mu.Unlock()
 	}
 	// 下线。
 	mobHub.mu.Lock()
@@ -268,4 +309,121 @@ func (s *Server) mobileRPCHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, json.RawMessage(resp))
+}
+// mobileDropDir 返回设备产物的落盘目录：设备被任务占用时优先落任务目录
+// tasks/<occupied>/mobile/，否则落 <data>/mobile-drops/<deviceId>/。
+func (s *Server) mobileDropDir(deviceID string) string {
+	mobHub.mu.RLock()
+	d := mobHub.devices[deviceID]
+	mobHub.mu.RUnlock()
+	if d != nil && d.occupiedBy != "" {
+		return filepath.Join(s.m.dir, "tasks", d.occupiedBy, "mobile")
+	}
+	return filepath.Join(s.m.dir, "mobile-drops", deviceID)
+}
+
+// mobileFirstDevice 返回当前第一台在线设备的连接（单设备简化；多设备调度 M4）。
+func (s *Server) mobileFirstDevice() *droidConn {
+	mobHub.mu.RLock()
+	defer mobHub.mu.RUnlock()
+	for _, d := range mobHub.devices {
+		return d
+	}
+	return nil
+}
+
+// mobileToolCall 是 agent 工具层的统一入口：把协议命令投递到在线设备并
+// 返回 result 帧（data 分片已由读循环聚合落盘，响应里带 file_path）。
+func (s *Server) mobileToolCall(taskID int64, frame map[string]any) (map[string]any, error) {
+	d := s.mobileFirstDevice()
+	if d == nil {
+		return nil, fmt.Errorf("无在线设备：请先在真机启动 DroidBridge 反连")
+	}
+	// 命令超时：frame.timeoutMs 优先，缺省 30s。
+	timeout := 30 * time.Second
+	if v, ok := frame["timeoutMs"].(float64); ok && v > 0 && v < 600000 {
+		timeout = time.Duration(v) * time.Millisecond
+	}
+	// 占用登记：任务产出落任务目录（exec 等无产物命令也登记，形成任务-设备关联）。
+	if taskID > 0 {
+		mobHub.mu.Lock()
+		if d.occupiedBy == "" {
+			d.occupiedBy = fmt.Sprintf("%d", taskID)
+		}
+		mobHub.mu.Unlock()
+	}
+	// push 特殊处理：frame.file 是任务目录内的相对路径，需要 server 读文件
+	// 并按 256KB 分片逐帧推送（seq=0 截断，done=true 才有 result 帧）。
+	if t, _ := frame["t"].(string); t == "push" {
+		return s.mobilePushFile(d, taskID, frame, timeout)
+	}
+	resp, err := d.call(context.Background(), frame, timeout)
+	if err != nil {
+		return nil, err
+	}
+	var out map[string]any
+	if err := json.Unmarshal(resp, &out); err != nil {
+		return nil, fmt.Errorf("响应解析失败: %v", err)
+	}
+	// 补充产物路径（data 聚合帧带 file_path）。
+	if fp, ok := out["file_path"].(string); ok && taskID > 0 {
+		out["file_path"] = fp
+	}
+	return out, nil
+}
+
+// mobilePushFile 把任务目录内的文件按 256KB 分片推到设备（droid-protocol push）。
+func (s *Server) mobilePushFile(d *droidConn, taskID int64, frame map[string]any, timeout time.Duration) (map[string]any, error) {
+	fileRel, _ := frame["file"].(string)
+	destPath, _ := frame["destPath"].(string)
+	mode, _ := frame["mode"].(string)
+	if mode == "" {
+		mode = "0700"
+	}
+	rel := strings.TrimPrefix(strings.TrimPrefix(filepath.ToSlash(fileRel), "/"), "./")
+	if strings.HasPrefix(rel, "..") || filepath.IsAbs(rel) {
+		return nil, fmt.Errorf("file 必须是任务目录内的相对路径")
+	}
+	abs := filepath.Join(s.m.dir, "tasks", fmt.Sprintf("%d", taskID), filepath.FromSlash(rel))
+	data, err := os.ReadFile(abs)
+	if err != nil {
+		return nil, fmt.Errorf("读取文件失败: %v", err)
+	}
+	const chunk = 256 * 1024
+	var lastResp json.RawMessage
+	if len(data) == 0 {
+		// 空文件也要走一次 done 帧。
+		resp, err := d.call(context.Background(), map[string]any{
+			"t": "push", "destPath": destPath, "path": destPath, "seq": 0.0, "done": true, "b64": "", "mode": mode,
+		}, timeout)
+		if err != nil {
+			return nil, err
+		}
+		lastResp = resp
+	} else {
+		total := (len(data) + chunk - 1) / chunk
+		for i, off := 0, 0; off < len(data); i, off = i+1, off+chunk {
+			end := off + chunk
+			if end > len(data) {
+				end = len(data)
+			}
+			isLast := i == total-1
+			resp, err := d.call(context.Background(), map[string]any{
+				"t": "push", "destPath": destPath, "path": destPath,
+				"seq": float64(i), "done": isLast,
+				"b64": base64.StdEncoding.EncodeToString(data[off:end]), "mode": mode,
+			}, timeout)
+			if err != nil {
+				return nil, fmt.Errorf("分片 %d/%d 推送失败: %v", i+1, total, err)
+			}
+			if isLast {
+				lastResp = resp
+			}
+		}
+	}
+	var out map[string]any
+	if err := json.Unmarshal(lastResp, &out); err != nil {
+		return nil, fmt.Errorf("响应解析失败: %v", err)
+	}
+	return out, nil
 }

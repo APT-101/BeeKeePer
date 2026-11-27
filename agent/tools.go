@@ -78,7 +78,10 @@ type ToolSet struct {
 	cs              *db.CompanyStore // company store (optional)
 	comp            *db.ComponentStore     // 固件组件 store（可选；nil = IoT 组件工具不可用）
 	fwx             *db.FirmwareExtractStore // 固件解包登记 store（可选；与 comp 同进退）
-	mobsfScanFn     func(taskID int64, relPath string) (map[string]any, error) // MobSF 静态扫描（server 注入；nil = 未 wire，工具报未启用）
+	mobsfScanFn     func(taskID int64, relPath string) (map[string]any, error) // MobSF 静态扫描（server
+	// mobileFn 是 server 注入的设备命令通道（M2 动态轨）：帧投递到反连的
+	// DroidBridge 设备并返回 result/data 聚合帧；nil = 无在线设备或未接线。
+	mobileFn func(taskID int64, frame mobileFrame) (map[string]any, error)
 	ts              *db.ExplorationStore
 	worker          string
 	taskID          int64 // PG tasks.id; 0 when unknown (tests / orchestrator cross-task reads)
@@ -194,6 +197,12 @@ func NewToolSet(ts *db.ExplorationStore, worker string) *ToolSet {
 // 避免 agent → server 的反向依赖。
 func (t *ToolSet) SetMobsfScan(fn func(taskID int64, relPath string) (map[string]any, error)) {
 	t.mobsfScanFn = fn
+}
+
+// SetMobileFn 注入 DroidBridge 设备命令通道（server 的 mobileToolCall）。
+// nil = 无在线设备或未接线，mobile_* 工具报"未启用"。
+func (t *ToolSet) SetMobileFn(fn func(taskID int64, frame mobileFrame) (map[string]any, error)) {
+	t.mobileFn = fn
 }
 
 // SetTaskID sets the PG task id on this ToolSet so that report_finding can
