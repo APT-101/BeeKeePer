@@ -27,6 +27,7 @@ web/next-env.d.ts
 # docs（本地目录默认忽略；正式架构文档以 ! 例外放行）
 /docs/**
 !/docs/mobile-architecture.md
+!/docs/mobile-m2-gateway.md
 
 # os
 .DS_Store
