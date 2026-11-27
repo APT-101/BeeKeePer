@@ -91,6 +91,11 @@ export function EnginesCard() {
       <span className="text-muted-foreground">● {p.reason || "未测试"}</span>
     );
 
+  const wsUrl = React.useMemo(() => {
+    if (typeof window === "undefined") return "";
+    const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+    return proto + "//" + window.location.host + "/ws/droid";
+  }, []);
   // ---- M2 动态轨：DroidBridge 反连网关 ----
   type MobileDevice = {
     deviceId: string;
@@ -102,6 +107,7 @@ export function EnginesCard() {
   };
   const [mobileCfg, setMobileCfg] = React.useState<{
     configured: boolean;
+    token: string;
     token_masked: string;
     online_devices: MobileDevice[];
   } | null>(null);
@@ -246,13 +252,48 @@ export function EnginesCard() {
           </p>
           <div className="flex flex-col gap-1.5">
             <Label className="text-muted-foreground text-sm font-normal">
-              配对 Token {mobileCfg?.configured && mobileCfg.token_masked && (
+              设备端反连地址（复制到 DroidBridge 的「服务器地址」）
+            </Label>
+            <div className="flex items-center gap-2">
+              <code className="min-w-0 flex-1 truncate rounded-md border bg-muted/40 px-2 py-1.5 font-mono text-xs">
+                {wsUrl || `ws://<控制台IP>:8787/ws/droid`}
+              </code>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => {
+                  navigator.clipboard.writeText(wsUrl);
+                  toast.success("反连地址已复制");
+                }}
+                disabled={!wsUrl}
+              >
+                复制
+              </Button>
+            </div>
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label className="text-muted-foreground text-sm font-normal">
+              配对 Token（复制到 DroidBridge 的「token」）{mobileCfg?.configured && mobileCfg.token_masked && (
                 <span className="ml-1 font-mono text-emerald-500">
                   已配置（{mobileCfg.token_masked}）
                 </span>
               )}
             </Label>
             <div className="flex items-center gap-2">
+              <code className="min-w-0 flex-1 truncate rounded-md border bg-muted/40 px-2 py-1.5 font-mono text-xs">
+                {mobileCfg?.token || "—"}
+              </code>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => {
+                  navigator.clipboard.writeText(mobileCfg?.token ?? "");
+                  toast.success("token 已复制");
+                }}
+                disabled={!mobileCfg?.token}
+              >
+                复制
+              </Button>
               <Button size="sm" variant="outline" onClick={rotateMobileToken} disabled={!mobileLoaded || rotating}>
                 {rotating ? "更换中…" : "更换配对 Token"}
               </Button>

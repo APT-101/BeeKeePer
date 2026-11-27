@@ -1202,6 +1202,7 @@ export const api = {
   getMobileConfig: () =>
     get<{
       configured: boolean;
+      token: string;
       token_masked: string;
       endpoint: string;
       online_devices: {
@@ -1216,6 +1217,7 @@ export const api = {
   rotateMobileToken: () =>
     post<{
       configured: boolean;
+      token: string;
       token_masked: string;
       online_devices: {
         deviceId: string;

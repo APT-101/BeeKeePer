@@ -528,6 +528,7 @@ func (s *Server) mobileConfigHTTP(w http.ResponseWriter, r *http.Request) {
 	mobHub.mu.RUnlock()
 	writeJSON(w, 200, map[string]any{
 		"configured":     tok != "",
+		"token":          tok, // 明文：设置页是 admin JWT 保护下的配置下发场景，设备端需要完整值填写
 		"token_masked":   masked,
 		"endpoint":       "/ws/droid",
 		"online_devices": list,
